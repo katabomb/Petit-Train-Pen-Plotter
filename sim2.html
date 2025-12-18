@@ -1,0 +1,296 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>プチ電車ペンプロッタ2｜A=延長 / B=原点90°曲げ（両方m）＋共通カム中心</title>
+<style>
+  body{font-family:system-ui,Segoe UI,sans-serif;margin:10px}
+  .row{display:flex;gap:12px;flex-wrap:wrap;align-items:flex-start}
+  canvas{border:1px solid #aaa;border-radius:10px}
+  .panel{min-width:320px;max-width:560px}
+  .card{border:1px solid #ddd;border-radius:12px;padding:10px 12px;margin-bottom:10px}
+  label{display:grid;grid-template-columns:1fr 95px;gap:10px;align-items:center;margin:6px 0}
+  input[type=range]{width:100%}
+  .btns{display:flex;gap:8px;flex-wrap:wrap}
+  button{padding:7px 10px;border-radius:10px;border:1px solid #ccc;background:#fff;cursor:pointer}
+  .mono{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12px}
+  .hint{color:#444;font-size:13px;line-height:1.45}
+</style>
+</head>
+
+<body>
+<div class="row">
+  <canvas id="cv" width="940" height="1180"></canvas>
+
+  <div class="panel">
+    <div class="card">
+      <div class="btns">
+        <button id="play">▶ 再生</button>
+        <button id="pause">⏸ 停止</button>
+        <button id="clearTrail">🧽 軌跡クリア</button>
+      </div>
+      <div class="hint" style="margin-top:8px">
+        🔵A：魚の原点側バー(O→P)と一体。原点をまたいで反対側へ延長した先端が接触点（長さm）。<br>
+        🔴B：魚のもう一方の原点側バー(O→Q)と一体。ただし<b>原点で±90°折れた方向</b>へ伸びる1本バー（長さm）。<br>
+        🟢口M（ペン）と軌跡、⭕共通中心Cからの距離 rA/rB（カム凹凸の直感）を表示。
+      </div>
+    </div>
+
+    <div class="card">
+      <b>寸法</b>
+      <label>4節リンク長 l<span class="mono" id="vl"></span>
+        <input id="l" type="range" min="60" max="280" value="140">
+      </label>
+      <label>入力バー長 m（AもBも同じ）<span class="mono" id="vm"></span>
+        <input id="m" type="range" min="80" max="520" value="260">
+      </label>
+      <label>ズーム<span class="mono" id="vz"></span>
+        <input id="zoom" type="range" min="55" max="150" value="100">
+      </label>
+      <label>原点高さ<span class="mono" id="voy"></span>
+        <input id="oy" type="range" min="0.22" max="0.55" step="0.01" value="0.35">
+      </label>
+      <label>グリッド間隔<span class="mono" id="vgrid"></span>
+        <input id="gridStep" type="range" min="10" max="80" value="20">
+      </label>
+    </div>
+
+    <div class="card">
+      <b>入力角（A/Bが別々に揺れて合成運動）</b>
+      <label>θA0<span class="mono" id="vta0"></span>
+        <input id="ta0" type="range" min="-180" max="180" value="45">
+      </label>
+      <label>θB0<span class="mono" id="vtb0"></span>
+        <input id="tb0" type="range" min="-180" max="180" value="135">
+      </label>
+      <label>振幅A<span class="mono" id="vampA"></span>
+        <input id="ampA" type="range" min="0" max="140" value="35">
+      </label>
+      <label>振幅B<span class="mono" id="vampB"></span>
+        <input id="ampB" type="range" min="0" max="140" value="55">
+      </label>
+      <label>位相差 φ<span class="mono" id="vphi"></span>
+        <input id="phi" type="range" min="-180" max="180" value="90">
+      </label>
+      <label>速度<span class="mono" id="vspd"></span>
+        <input id="spd" type="range" min="5" max="240" value="70">
+      </label>
+    </div>
+
+    <div class="card">
+      <b>Bの曲げ方向</b>
+      <label>+90° / -90°<span class="mono" id="vbsgn"></span>
+        <input id="bsgn" type="range" min="-1" max="1" step="2" value="1">
+      </label>
+    </div>
+
+    <div class="card">
+      <b>共通カム中心 C（y&lt;0推奨）</b>
+      <label>Cx<span class="mono" id="vcx"></span>
+        <input id="cx" type="range" min="-340" max="340" value="0">
+      </label>
+      <label>Cy<span class="mono" id="vcy"></span>
+        <input id="cy" type="range" min="-900" max="-40" value="-260">
+      </label>
+      <label>円表示 <input id="showCircles" type="checkbox" checked></label>
+      <label>半径線 <input id="showRays" type="checkbox" checked></label>
+      <label>成立補正(強)<span class="mono" id="vfix"></span>
+        <input id="fix" type="range" min="0" max="100" value="50">
+      </label>
+    </div>
+
+    <div class="card"><div class="mono" id="readout"></div></div>
+  </div>
+</div>
+
+<script>
+(() => {
+  const cv = document.getElementById("cv");
+  const ctx = cv.getContext("2d");
+  let running = true, t = 0;
+  const rad = d => d*Math.PI/180;
+
+  const trail = [];
+  const TRAIL_MAX = 14000;
+
+  function W(p){
+    const s = Number(zoom.value)/100;
+    const oyRatio = Number(oy.value);
+    return { x: cv.width/2 + p.x*s, y: cv.height*oyRatio - p.y*s };
+  }
+  function drawLine(p,q,w,stroke){
+    const a=W(p), b=W(q);
+    ctx.save(); ctx.lineWidth=w; ctx.strokeStyle=stroke;
+    ctx.beginPath(); ctx.moveTo(a.x,a.y); ctx.lineTo(b.x,b.y); ctx.stroke();
+    ctx.restore();
+  }
+  function drawDot(p,r,fill){
+    const a=W(p);
+    ctx.save(); ctx.fillStyle=fill;
+    ctx.beginPath(); ctx.arc(a.x,a.y,r,0,Math.PI*2); ctx.fill();
+    ctx.restore();
+  }
+  function drawCircle(c,r,stroke){
+    const a=W(c);
+    const s = Number(zoom.value)/100;
+    ctx.save(); ctx.strokeStyle=stroke; ctx.lineWidth=3;
+    ctx.beginPath(); ctx.arc(a.x,a.y,r*s,0,Math.PI*2); ctx.stroke();
+    ctx.restore();
+  }
+  function drawGrid(){
+    const s = Number(zoom.value)/100;
+    const step = Number(gridStep.value);
+    const ox = cv.width/2;
+    const oyPix = cv.height*Number(oy.value);
+    ctx.save(); ctx.lineWidth=1; ctx.strokeStyle="#eee";
+    for(let x=-1400;x<=1400;x+=step){ const X=ox+x*s; ctx.beginPath(); ctx.moveTo(X,0); ctx.lineTo(X,cv.height); ctx.stroke(); }
+    for(let y=-1400;y<=1400;y+=step){ const Y=oyPix-y*s; ctx.beginPath(); ctx.moveTo(0,Y); ctx.lineTo(cv.width,Y); ctx.stroke(); }
+    ctx.strokeStyle="#ccc";
+    ctx.beginPath(); ctx.moveTo(ox,0); ctx.lineTo(ox,cv.height); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(0,oyPix); ctx.lineTo(cv.width,oyPix); ctx.stroke();
+    ctx.restore();
+  }
+  function refreshLabels(){
+    vl.textContent = `${Number(l.value).toFixed(0)}`;
+    vm.textContent = `${Number(m.value).toFixed(0)}`;
+    vz.textContent = `${Number(zoom.value).toFixed(0)}%`;
+    voy.textContent = `${Number(oy.value).toFixed(2)}`;
+    vgrid.textContent = `${Number(gridStep.value).toFixed(0)}`;
+    vta0.textContent = `${Number(ta0.value).toFixed(0)}°`;
+    vtb0.textContent = `${Number(tb0.value).toFixed(0)}°`;
+    vampA.textContent = `${Number(ampA.value).toFixed(0)}°`;
+    vampB.textContent = `${Number(ampB.value).toFixed(0)}°`;
+    vphi.textContent = `${Number(phi.value).toFixed(0)}°`;
+    vspd.textContent = `${Number(spd.value).toFixed(0)}`;
+    vcx.textContent = `${Number(cx.value).toFixed(0)}`;
+    vcy.textContent = `${Number(cy.value).toFixed(0)}`;
+    vfix.textContent = `${Number(fix.value).toFixed(0)}`;
+    vbsgn.textContent = (Number(bsgn.value)>0)?"+90":"-90";
+  }
+
+  // ひし形4節：Oが尾の付け根、P/Qが原点側2頂点、Mが口（反対側）
+  function fishFromAngles(theta1, theta2, lval){
+    const O = {x:0,y:0};
+    const fixStrength = Number(fix.value)/100;
+    let dth = theta2 - theta1;
+    while(dth > Math.PI) dth -= 2*Math.PI;
+    while(dth < -Math.PI) dth += 2*Math.PI;
+    dth *= (1 - 0.45*fixStrength);
+    theta2 = theta1 + dth;
+
+    const P = { x: lval*Math.cos(theta1), y: lval*Math.sin(theta1) };
+    const Q = { x: lval*Math.cos(theta2), y: lval*Math.sin(theta2) };
+
+    const dx = Q.x - P.x, dy = Q.y - P.y;
+    const d = Math.hypot(dx,dy);
+
+    let M;
+    if(d < 1e-9){
+      M = {x:P.x, y:P.y + lval};
+    } else {
+      const dClamped = Math.min(d, 2*lval - 1e-6);
+      const mx = (P.x + Q.x)/2, my = (P.y + Q.y)/2;
+      const h = Math.sqrt(Math.max(0, lval*lval - (dClamped*dClamped)/4));
+      const nx = -dy/d, ny = dx/d;
+      const M1 = {x: mx + nx*h, y: my + ny*h};
+      const M2 = {x: mx - nx*h, y: my - ny*h};
+      M = (M1.y >= M2.y) ? M1 : M2;
+    }
+    return {O,P,Q,M, theta1, theta2};
+  }
+
+  function loop(){
+    if(running) t += Number(spd.value) * 0.0008;
+    ctx.clearRect(0,0,cv.width,cv.height);
+    drawGrid();
+    refreshLabels();
+
+    const lval = Number(l.value);
+    const mval = Number(m.value);
+    const phiVal = rad(Number(phi.value));
+    const bendSign = (Number(bsgn.value)>0) ? 1 : -1;
+
+    // 角度（魚の原点側2本）
+    const thetaA = rad(Number(ta0.value)) + rad(Number(ampA.value))*Math.sin(t);
+    const thetaB = rad(Number(tb0.value)) + rad(Number(ampB.value))*Math.sin(t + phiVal);
+
+    const fish = fishFromAngles(thetaA, thetaB, lval);
+    const O=fish.O, P=fish.P, Q=fish.Q, M=fish.M;
+
+    // 口軌跡
+    trail.push(M);
+    if(trail.length > TRAIL_MAX) trail.splice(0, trail.length - TRAIL_MAX);
+
+    // A：延長（長さm、向きはthetaAに追従）
+    const A_tip   = { x: -mval*Math.cos(thetaA), y: -mval*Math.sin(thetaA) };
+    const A_other = { x:  mval*Math.cos(thetaA), y:  mval*Math.sin(thetaA) };
+
+    // ★B：Aと同じく動く。ただし「原点で90°曲げた方向」＝ thetaB ± 90°
+    const B_tip = {
+      x:  mval*Math.cos(thetaB + bendSign*Math.PI/2),
+      y:  mval*Math.sin(thetaB + bendSign*Math.PI/2)
+    };
+
+    // 共通カム中心
+    const Cc = { x:Number(cx.value), y:Number(cy.value) };
+    const rA = Math.hypot(A_tip.x - Cc.x, A_tip.y - Cc.y);
+    const rB = Math.hypot(B_tip.x - Cc.x, B_tip.y - Cc.y);
+
+    // ===== 描画 =====
+
+    // 口の軌跡
+    if(trail.length >= 2){
+      ctx.save(); ctx.strokeStyle="rgba(0,150,0,0.78)"; ctx.lineWidth=2;
+      ctx.beginPath();
+      const s0=W(trail[0]); ctx.moveTo(s0.x,s0.y);
+      for(let i=1;i<trail.length;i++){ const si=W(trail[i]); ctx.lineTo(si.x,si.y); }
+      ctx.stroke(); ctx.restore();
+    }
+
+    // 魚
+    drawLine(O,P,3,"rgba(0,0,0,0.70)");
+    drawLine(O,Q,3,"rgba(0,0,0,0.70)");
+    drawLine(P,M,4,"rgba(0,120,0,0.58)");
+    drawLine(Q,M,4,"rgba(0,120,0,0.58)");
+    drawLine(P,Q,1.5,"rgba(0,0,0,0.18)");
+    drawDot(O,4,"black"); drawDot(P,4,"black"); drawDot(Q,4,"black"); drawDot(M,6,"green");
+
+    // A
+    drawLine(A_other, A_tip, 2, "rgba(0,0,255,0.18)");
+    drawLine(O, A_tip, 6, "rgba(0,0,255,0.55)");
+    drawDot(A_tip, 5, "blue");
+
+    // B（追従して動く、常に90°オフセット）
+    drawLine(O, B_tip, 6, "rgba(255,0,0,0.55)");
+    drawDot(B_tip, 5, "red");
+
+    // カム中心＋円
+    drawDot(Cc,5,"black");
+    if(showRays.checked){
+      drawLine(Cc, A_tip, 1, "rgba(0,0,0,0.15)");
+      drawLine(Cc, B_tip, 1, "rgba(0,0,0,0.12)");
+    }
+    if(showCircles.checked){
+      drawCircle(Cc, rA, "rgba(0,0,255,0.45)");
+      drawCircle(Cc, rB, "rgba(255,0,0,0.35)");
+    }
+
+    readout.textContent =
+`θA=${(thetaA*180/Math.PI).toFixed(1)}°  θB=${(thetaB*180/Math.PI).toFixed(1)}°  B曲げ=${bendSign>0?"+90":"-90"}°
+M(口)=(${M.x.toFixed(1)}, ${M.y.toFixed(1)})
+A_tip=(${A_tip.x.toFixed(1)}, ${A_tip.y.toFixed(1)})  rA=${rA.toFixed(1)}
+B_tip=(${B_tip.x.toFixed(1)}, ${B_tip.y.toFixed(1)})  rB=${rB.toFixed(1)}
+C=(${Cc.x.toFixed(1)}, ${Cc.y.toFixed(1)})`;
+
+    requestAnimationFrame(loop);
+  }
+
+  play.onclick=()=>running=true;
+  pause.onclick=()=>running=false;
+  clearTrail.onclick=()=>{trail.length=0;};
+  loop();
+})();
+</script>
+</body>
+</html>
