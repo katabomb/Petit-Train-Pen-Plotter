@@ -226,10 +226,10 @@
     const A_tip   = { x: -mval*Math.cos(thetaA), y: -mval*Math.sin(thetaA) };
     const A_other = { x:  mval*Math.cos(thetaA), y:  mval*Math.sin(thetaA) };
 
-    // ★B：Aと同じく動く。ただし「原点で90°曲げた方向」＝ thetaB ± 90°
+    // ★Bは fish.theta2 に追従して ±90°
     const B_tip = {
-      x:  mval*Math.cos(thetaB + bendSign*Math.PI/2),
-      y:  mval*Math.sin(thetaB + bendSign*Math.PI/2)
+      x: mval * Math.cos(fish.theta2 + bendSign * Math.PI / 2),
+      y: mval * Math.sin(fish.theta2 + bendSign * Math.PI / 2)
     };
 
     // 共通カム中心
