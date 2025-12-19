@@ -79,13 +79,6 @@
     </div>
 
     <div class="card">
-      <b>Bの曲げ方向</b>
-      <label>+90° / -90°<span class="mono" id="vbsgn"></span>
-        <input id="bsgn" type="range" min="-1" max="1" step="2" value="1">
-      </label>
-    </div>
-
-    <div class="card">
       <b>共通カム中心 C（y&lt;0推奨）</b>
       <label>Cx<span class="mono" id="vcx"></span>
         <input id="cx" type="range" min="-340" max="340" value="0">
@@ -112,7 +105,7 @@
   const rad = d => d*Math.PI/180;
 
   const trail = [];
-  const TRAIL_MAX = 14000;
+  const TRAIL_MAX = 2500;
 
   function W(p){
     const s = Number(zoom.value)/100;
@@ -209,7 +202,7 @@
     const lval = Number(l.value);
     const mval = Number(m.value);
     const phiVal = rad(Number(phi.value));
-    const bendSign = (Number(bsgn.value)>0) ? 1 : -1;
+    const bendSign = 1; // +90°で固定
 
     // 角度（魚の原点側2本）
     const thetaA = rad(Number(ta0.value)) + rad(Number(ampA.value))*Math.sin(t);
