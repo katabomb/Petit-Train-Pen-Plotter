@@ -115,16 +115,34 @@
   }
 
   function fish(theta1, theta2, l){
-    const O={x:0,y:0};
-    const P={x:l*Math.cos(theta1), y:l*Math.sin(theta1)};
-    const Q={x:l*Math.cos(theta2), y:l*Math.sin(theta2)};
-    const mx=(P.x+Q.x)/2, my=(P.y+Q.y)/2;
-    const dx=Q.x-P.x, dy=Q.y-P.y;
-    const d=Math.hypot(dx,dy);
-    const h=Math.sqrt(Math.max(0,l*l-(d*d)/4));
-    const nx=-dy/d, ny=dx/d;
-    const M={x:mx+nx*h, y:my+ny*h};
-    return {O,P,Q,M,theta2};
+    const O = {x:0, y:0};
+    const P = {x:l*Math.cos(theta1), y:l*Math.sin(theta1)};
+    const Q = {x:l*Math.cos(theta2), y:l*Math.sin(theta2)};
+
+    const dx = Q.x - P.x;
+    const dy = Q.y - P.y;
+    const d  = Math.hypot(dx, dy);
+
+    let M;
+    if (d < 1e-6) {
+      // ★ 特異点回避（完全に重なった場合）
+      M = {
+        x: P.x,
+        y: P.y + l
+      };
+    } else {
+      const mx = (P.x + Q.x)/2;
+      const my = (P.y + Q.y)/2;
+      const h  = Math.sqrt(Math.max(0, l*l - (d*d)/4));
+      const nx = -dy / d;
+      const ny =  dx / d;
+      M = {
+        x: mx + nx*h,
+        y: my + ny*h
+      };
+    }
+
+    return {O, P, Q, M, theta2};
   }
 
   function loop(){
