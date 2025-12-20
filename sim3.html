@@ -100,6 +100,9 @@
 <script>
 (() => {
   const cv = document.getElementById("cv");
+  let rA_min = Infinity, rA_max = -Infinity;
+  let rB_min = Infinity, rB_max = -Infinity;
+
   const ctx = cv.getContext("2d");
   let running = true, t = 0;
   const rad = d => d*Math.PI/180;
@@ -228,6 +231,12 @@
     const Cc = { x:Number(cx.value), y:Number(cy.value) };
     const rA = Math.hypot(A_tip.x - Cc.x, A_tip.y - Cc.y);
     const rB = Math.hypot(B_tip.x - Cc.x, B_tip.y - Cc.y);
+    
+    rA_min = Math.min(rA_min, rA);
+    rA_max = Math.max(rA_max, rA);
+    rB_min = Math.min(rB_min, rB);
+    rB_max = Math.max(rB_max, rB);
+
 
     // ===== 描画 =====
 
@@ -269,18 +278,22 @@
     }
 
     readout.textContent =
-`θA=${(thetaA*180/Math.PI).toFixed(1)}°  θB=${(thetaB*180/Math.PI).toFixed(1)}°  B曲げ=${bendSign>0?"+90":"-90"}°
-M(口)=(${M.x.toFixed(1)}, ${M.y.toFixed(1)})
-A_tip=(${A_tip.x.toFixed(1)}, ${A_tip.y.toFixed(1)})  rA=${rA.toFixed(1)}
-B_tip=(${B_tip.x.toFixed(1)}, ${B_tip.y.toFixed(1)})  rB=${rB.toFixed(1)}
-C=(${Cc.x.toFixed(1)}, ${Cc.y.toFixed(1)})`;
+    `θA=${(thetaA*180/Math.PI).toFixed(1)}°  θB=${(thetaB*180/Math.PI).toFixed(1)}°
+    M(口)=(${M.x.toFixed(1)}, ${M.y.toFixed(1)})
+    A: r=${rA.toFixed(1)}  [min=${rA_min.toFixed(1)}, max=${rA_max.toFixed(1)}]
+    B: r=${rB.toFixed(1)}  [min=${rB_min.toFixed(1)}, max=${rB_max.toFixed(1)}]
+    C=(${Cc.x.toFixed(1)}, ${Cc.y.toFixed(1)})`;
 
     requestAnimationFrame(loop);
   }
 
   play.onclick=()=>running=true;
   pause.onclick=()=>running=false;
-  clearTrail.onclick=()=>{trail.length=0;};
+  clearTrail.onclick = () => {
+    trail.length = 0;
+    rA_min = Infinity; rA_max = -Infinity;
+    rB_min = Infinity; rB_max = -Infinity;
+  };
   loop();
 })();
 </script>
