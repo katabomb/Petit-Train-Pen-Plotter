@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1"/>
-<title>プチ電車ペンプロッタ2｜カム1周 min/max 表示</title>
+<title>プチ電車ペンプロッタ2｜カム最大径・最小径つき</title>
 <style>
   body{font-family:system-ui,Segoe UI,sans-serif;margin:10px}
   .row{display:flex;gap:12px;flex-wrap:wrap;align-items:flex-start}
@@ -14,7 +14,7 @@
   input[type=range]{width:100%}
   .btns{display:flex;gap:8px;flex-wrap:wrap}
   button{padding:7px 10px;border-radius:10px;border:1px solid #ccc;background:#fff;cursor:pointer}
-  .mono{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:13px;line-height:1.6}
+  .mono{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12px;white-space:pre}
 </style>
 </head>
 
@@ -27,213 +27,176 @@
       <div class="btns">
         <button id="play">▶ 再生</button>
         <button id="pause">⏸ 停止</button>
-        <button id="clearTrail">🧽 リセット</button>
+        <button id="clearTrail">🧽 軌跡クリア</button>
       </div>
     </div>
 
     <div class="card">
       <b>寸法</b>
-      <label>4節リンク長 l<input id="l" type="range" min="60" max="280" value="140"></label>
-      <label>入力バー長 m<input id="m" type="range" min="80" max="520" value="260"></label>
-      <label>ズーム<input id="zoom" type="range" min="55" max="150" value="75"></label>
-      <label>原点高さ<input id="oy" type="range" min="0.22" max="0.55" step="0.01" value="0.35"></label>
-      <label>グリッド<input id="gridStep" type="range" min="10" max="80" value="20"></label>
+      <label>4節リンク長 l<span id="vl" class="mono"></span>
+        <input id="l" type="range" min="60" max="280" value="140">
+      </label>
+      <label>入力バー長 m<span id="vm" class="mono"></span>
+        <input id="m" type="range" min="80" max="520" value="260">
+      </label>
+      <label>ズーム<span id="vz" class="mono"></span>
+        <input id="zoom" type="range" min="55" max="150" value="75">
+      </label>
     </div>
 
     <div class="card">
       <b>入力角</b>
-      <label>θA0<input id="ta0" type="range" min="-180" max="180" value="45"></label>
-      <label>θB0<input id="tb0" type="range" min="-180" max="180" value="135"></label>
-      <label>振幅A<input id="ampA" type="range" min="0" max="140" value="35"></label>
-      <label>振幅B<input id="ampB" type="range" min="0" max="140" value="55"></label>
-      <label>位相差 φ<input id="phi" type="range" min="-180" max="180" value="90"></label>
-      <label>速度<input id="spd" type="range" min="5" max="240" value="70"></label>
+      <label>θA0<span id="vta0" class="mono"></span>
+        <input id="ta0" type="range" min="-180" max="180" value="45">
+      </label>
+      <label>θB0<span id="vtb0" class="mono"></span>
+        <input id="tb0" type="range" min="-180" max="180" value="135">
+      </label>
+      <label>振幅A<span id="vampA" class="mono"></span>
+        <input id="ampA" type="range" min="0" max="140" value="35">
+      </label>
+      <label>振幅B<span id="vampB" class="mono"></span>
+        <input id="ampB" type="range" min="0" max="140" value="55">
+      </label>
+      <label>位相差 φ<span id="vphi" class="mono"></span>
+        <input id="phi" type="range" min="-180" max="180" value="90">
+      </label>
     </div>
 
     <div class="card">
-      <b>共通カム中心</b>
-      <label>Cx<input id="cx" type="range" min="-340" max="340" value="0"></label>
-      <label>Cy<input id="cy" type="range" min="-900" max="-40" value="-260"></label>
+      <b>共通カム中心 C</b>
+      <label>Cx<span id="vcx" class="mono"></span>
+        <input id="cx" type="range" min="-340" max="340" value="0">
+      </label>
+      <label>Cy<span id="vcy" class="mono"></span>
+        <input id="cy" type="range" min="-900" max="-40" value="-260">
+      </label>
     </div>
 
     <div class="card">
-      <div class="mono" id="readout"></div>
+      <b>カム半径（1周）</b>
+      <div id="camStats" class="mono"></div>
     </div>
   </div>
 </div>
 
 <script>
-  (() => {
-
-  const l = document.getElementById("l");
-  const m = document.getElementById("m");
-  const zoom = document.getElementById("zoom");
-  const oy = document.getElementById("oy");
-  const gridStep = document.getElementById("gridStep");
-
-  const ta0 = document.getElementById("ta0");
-  const tb0 = document.getElementById("tb0");
-  const ampA = document.getElementById("ampA");
-  const ampB = document.getElementById("ampB");
-  const phi = document.getElementById("phi");
-  const spd = document.getElementById("spd");
-
-  const cx = document.getElementById("cx");
-  const cy = document.getElementById("cy");
-
-  const play = document.getElementById("play");
-  const pause = document.getElementById("pause");
-  const clearTrail = document.getElementById("clearTrail");
-  const readout = document.getElementById("readout");
-  
+(() => {
   const cv = document.getElementById("cv");
   const ctx = cv.getContext("2d");
   const rad = d => d*Math.PI/180;
-  let running = true;
-  let t = 0;
 
-  // ===== 軌跡（5周分） =====
+  let running = true, t = 0;
   const trail = [];
   const TRAIL_MAX = 2500;
 
-  // ===== カム1周ごとの min/max 管理 =====
-  let rA_min_cur = Infinity, rA_max_cur = -Infinity;
-  let rB_min_cur = Infinity, rB_max_cur = -Infinity;
-  let rA_min_last = NaN, rA_max_last = NaN;
-  let rB_min_last = NaN, rB_max_last = NaN;
-  let camAnglePrev = 0;
-
   function W(p){
-    const s = zoom.value/100;
-    return {
-      x: cv.width/2 + p.x*s,
-      y: cv.height*oy.value - p.y*s
-    };
+    const s = Number(zoom.value)/100;
+    return { x: cv.width/2 + p.x*s, y: cv.height*0.35 - p.y*s };
   }
-
   function drawLine(p,q,w,c){
     const a=W(p), b=W(q);
-    ctx.strokeStyle=c; ctx.lineWidth=w;
+    ctx.save(); ctx.lineWidth=w; ctx.strokeStyle=c;
     ctx.beginPath(); ctx.moveTo(a.x,a.y); ctx.lineTo(b.x,b.y); ctx.stroke();
+    ctx.restore();
   }
   function drawDot(p,r,c){
     const a=W(p);
-    ctx.fillStyle=c;
+    ctx.save(); ctx.fillStyle=c;
     ctx.beginPath(); ctx.arc(a.x,a.y,r,0,Math.PI*2); ctx.fill();
+    ctx.restore();
+  }
+  function drawCircle(c,r,col){
+    const a=W(c), s=Number(zoom.value)/100;
+    ctx.save(); ctx.strokeStyle=col; ctx.lineWidth=3;
+    ctx.beginPath(); ctx.arc(a.x,a.y,r*s,0,Math.PI*2); ctx.stroke();
+    ctx.restore();
   }
 
-  function drawGrid(){
-    const s = zoom.value/100;
-    const step = gridStep.value;
-    const ox = cv.width/2;
-    const oyPix = cv.height*oy.value;
-    ctx.strokeStyle="#eee"; ctx.lineWidth=1;
-    for(let x=-1200;x<=1200;x+=step){
-      ctx.beginPath(); ctx.moveTo(ox+x*s,0); ctx.lineTo(ox+x*s,cv.height); ctx.stroke();
-    }
-    for(let y=-1200;y<=1200;y+=step){
-      ctx.beginPath(); ctx.moveTo(0,oyPix-y*s); ctx.lineTo(cv.width,oyPix-y*s); ctx.stroke();
-    }
-  }
+  function fishFromAngles(theta1, theta2, lval){
+    const O={x:0,y:0};
+    let dth=theta2-theta1;
+    while(dth>Math.PI)dth-=2*Math.PI;
+    while(dth<-Math.PI)dth+=2*Math.PI;
+    dth*=0.7;
+    theta2=theta1+dth;
 
-  function fish(theta1, theta2, l){
-    const O = {x:0, y:0};
-    const P = {x:l*Math.cos(theta1), y:l*Math.sin(theta1)};
-    const Q = {x:l*Math.cos(theta2), y:l*Math.sin(theta2)};
-
-    const dx = Q.x - P.x;
-    const dy = Q.y - P.y;
-    const d  = Math.hypot(dx, dy);
-
+    const P={x:lval*Math.cos(theta1),y:lval*Math.sin(theta1)};
+    const Q={x:lval*Math.cos(theta2),y:lval*Math.sin(theta2)};
+    const dx=Q.x-P.x, dy=Q.y-P.y;
+    const d=Math.hypot(dx,dy);
     let M;
-    if (d < 1e-6) {
-      // ★ 特異点回避（完全に重なった場合）
-      M = {
-        x: P.x,
-        y: P.y + l
-      };
-    } else {
-      const mx = (P.x + Q.x)/2;
-      const my = (P.y + Q.y)/2;
-      const h  = Math.sqrt(Math.max(0, l*l - (d*d)/4));
-      const nx = -dy / d;
-      const ny =  dx / d;
-      M = {
-        x: mx + nx*h,
-        y: my + ny*h
-      };
+    if(d<1e-6) M={x:P.x,y:P.y+lval};
+    else{
+      const mx=(P.x+Q.x)/2,my=(P.y+Q.y)/2;
+      const h=Math.sqrt(Math.max(0,lval*lval-(d*d)/4));
+      const nx=-dy/d, ny=dx/d;
+      const M1={x:mx+nx*h,y:my+ny*h};
+      const M2={x:mx-nx*h,y:my-ny*h};
+      M=(M1.y>=M2.y)?M1:M2;
     }
-
-    return {O, P, Q, M, theta2};
+    return {O,P,Q,M,theta2};
   }
+
+  function computeCamStats(){
+    let minA=Infinity,maxA=-Infinity,minB=Infinity,maxB=-Infinity;
+    const steps=720;
+    const lval=Number(l.value), mval=Number(m.value);
+    const cxv=Number(cx.value), cyv=Number(cy.value);
+    for(let i=0;i<steps;i++){
+      const ph=2*Math.PI*i/steps;
+      const thetaA=rad(Number(ta0.value))+rad(Number(ampA.value))*Math.sin(ph);
+      const thetaB=rad(Number(tb0.value))+rad(Number(ampB.value))*Math.sin(ph+rad(Number(phi.value)));
+      const fish=fishFromAngles(thetaA,thetaB,lval);
+      const A_tip={x:-mval*Math.cos(thetaA),y:-mval*Math.sin(thetaA)};
+      const B_tip={x:mval*Math.cos(fish.theta2+Math.PI/2),y:mval*Math.sin(fish.theta2+Math.PI/2)};
+      const rA=Math.hypot(A_tip.x-cxv,A_tip.y-cyv);
+      const rB=Math.hypot(B_tip.x-cxv,B_tip.y-cyv);
+      minA=Math.min(minA,rA); maxA=Math.max(maxA,rA);
+      minB=Math.min(minB,rB); maxB=Math.max(maxB,rB);
+    }
+    camStats.textContent=
+`A cam : min ${minA.toFixed(1)}  max ${maxA.toFixed(1)}
+B cam : min ${minB.toFixed(1)}  max ${maxB.toFixed(1)}`;
+  }
+
+  [l,m,ta0,tb0,ampA,ampB,phi,cx,cy].forEach(el=>el.oninput=computeCamStats);
 
   function loop(){
-    if(running) t += spd.value*0.0008;
+    if(running) t+=0.02;
     ctx.clearRect(0,0,cv.width,cv.height);
-    drawGrid();
 
-    const thetaA = rad(+ta0.value) + rad(+ampA.value)*Math.sin(t);
-    const thetaB = rad(+tb0.value) + rad(+ampB.value)*Math.sin(t+rad(+phi.value));
-    const {O,P,Q,M,theta2} = fish(thetaA,thetaB,+l.value);
+    const lval=Number(l.value), mval=Number(m.value);
+    const thetaA=rad(Number(ta0.value))+rad(Number(ampA.value))*Math.sin(t);
+    const thetaB=rad(Number(tb0.value))+rad(Number(ampB.value))*Math.sin(t+rad(Number(phi.value)));
 
-    trail.push(M);
-    if(trail.length>TRAIL_MAX) trail.shift();
+    const fish=fishFromAngles(thetaA,thetaB,lval);
+    const O=fish.O,P=fish.P,Q=fish.Q,M=fish.M;
 
-    // 入力バー
-    const A={x:-m.value*Math.cos(thetaA), y:-m.value*Math.sin(thetaA)};
-    const B={x: m.value*Math.cos(theta2+Math.PI/2), y:m.value*Math.sin(theta2+Math.PI/2)};
-    const C={x:+cx.value, y:+cy.value};
+    trail.push(M); if(trail.length>TRAIL_MAX) trail.shift();
 
-    const rA=Math.hypot(A.x-C.x,A.y-C.y);
-    const rB=Math.hypot(B.x-C.x,B.y-C.y);
+    const A_tip={x:-mval*Math.cos(thetaA),y:-mval*Math.sin(thetaA)};
+    const B_tip={x:mval*Math.cos(fish.theta2+Math.PI/2),y:mval*Math.sin(fish.theta2+Math.PI/2)};
+    const Cc={x:Number(cx.value),y:Number(cy.value)};
 
-    // 今周の更新
-    rA_min_cur=Math.min(rA_min_cur,rA);
-    rA_max_cur=Math.max(rA_max_cur,rA);
-    rB_min_cur=Math.min(rB_min_cur,rB);
-    rB_max_cur=Math.max(rB_max_cur,rB);
+    drawLine(O,P,3,"#444"); drawLine(O,Q,3,"#444");
+    drawLine(P,M,3,"#080"); drawLine(Q,M,3,"#080");
+    for(let i=1;i<trail.length;i++) drawLine(trail[i-1],trail[i],2,"rgba(0,150,0,.6)");
 
-    // 1周完了検出
-    const camAngle = t%(2*Math.PI);
-    if(camAngle<camAnglePrev){
-      rA_min_last=rA_min_cur; rA_max_last=rA_max_cur;
-      rB_min_last=rB_min_cur; rB_max_last=rB_max_cur;
-      rA_min_cur=Infinity; rA_max_cur=-Infinity;
-      rB_min_cur=Infinity; rB_max_cur=-Infinity;
-    }
-    camAnglePrev=camAngle;
-
-    // 描画
-    drawLine(O,P,3,"#000"); drawLine(O,Q,3,"#000");
-    drawLine(P,M,4,"#0a0"); drawLine(Q,M,4,"#0a0");
-    drawLine(O,A,4,"#00f"); drawLine(O,B,4,"#f00");
-    drawDot(M,5,"green"); drawDot(A,4,"blue"); drawDot(B,4,"red");
-
-    // 軌跡
-    ctx.strokeStyle="rgba(0,150,0,0.8)"; ctx.lineWidth=2;
-    ctx.beginPath();
-    trail.forEach((p,i)=>{const s=W(p); if(i==0)ctx.moveTo(s.x,s.y); else ctx.lineTo(s.x,s.y);});
-    ctx.stroke();
-
-    readout.textContent =
-`【直近1周のカム半径】
-A: min=${isNaN(rA_min_last)?"--":rA_min_last.toFixed(1)}  max=${isNaN(rA_max_last)?"--":rA_max_last.toFixed(1)}
-B: min=${isNaN(rB_min_last)?"--":rB_min_last.toFixed(1)}  max=${isNaN(rB_max_last)?"--":rB_max_last.toFixed(1)}
-C=(${C.x.toFixed(0)}, ${C.y.toFixed(0)})`;
+    drawLine(O,A_tip,5,"rgba(0,0,255,.5)");
+    drawLine(O,B_tip,5,"rgba(255,0,0,.5)");
+    drawDot(M,5,"green");
+    drawCircle(Cc,Math.hypot(A_tip.x-Cc.x,A_tip.y-Cc.y),"rgba(0,0,255,.4)");
+    drawCircle(Cc,Math.hypot(B_tip.x-Cc.x,B_tip.y-Cc.y),"rgba(255,0,0,.4)");
 
     requestAnimationFrame(loop);
   }
 
   play.onclick=()=>running=true;
   pause.onclick=()=>running=false;
-  clearTrail.onclick=()=>{
-    trail.length=0;
-    rA_min_cur=Infinity; rA_max_cur=-Infinity;
-    rB_min_cur=Infinity; rB_max_cur=-Infinity;
-    rA_min_last=NaN; rA_max_last=NaN;
-    rB_min_last=NaN; rB_max_last=NaN;
-  };
+  clearTrail.onclick=()=>trail.length=0;
 
+  computeCamStats();
   loop();
 })();
 </script>
