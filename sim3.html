@@ -63,7 +63,29 @@
 </div>
 
 <script>
-(() => {
+  (() => {
+
+  const l = document.getElementById("l");
+  const m = document.getElementById("m");
+  const zoom = document.getElementById("zoom");
+  const oy = document.getElementById("oy");
+  const gridStep = document.getElementById("gridStep");
+
+  const ta0 = document.getElementById("ta0");
+  const tb0 = document.getElementById("tb0");
+  const ampA = document.getElementById("ampA");
+  const ampB = document.getElementById("ampB");
+  const phi = document.getElementById("phi");
+  const spd = document.getElementById("spd");
+
+  const cx = document.getElementById("cx");
+  const cy = document.getElementById("cy");
+
+  const play = document.getElementById("play");
+  const pause = document.getElementById("pause");
+  const clearTrail = document.getElementById("clearTrail");
+  const readout = document.getElementById("readout");
+  
   const cv = document.getElementById("cv");
   const ctx = cv.getContext("2d");
   const rad = d => d*Math.PI/180;
