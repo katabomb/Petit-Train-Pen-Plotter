@@ -1,0 +1,247 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1"/>
+<title>線文メーカー（iPad/Pencil向け） v0.1</title>
+<style>
+  :root{
+    --bg:#ffffff; --ink:#000000; --muted:#666; --line:#ddd; --btn:#f4f4f4;
+    --accent:#0b66ff;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:system-ui,-apple-system,"Segoe UI",Roboto,"Noto Sans JP",sans-serif;background:var(--bg);color:var(--ink)}
+  header{position:sticky;top:0;background:var(--bg);border-bottom:1px solid var(--line);padding:10px 12px;z-index:5}
+  .row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+  button,select,input{
+    border:1px solid var(--line); background:var(--btn); border-radius:10px; padding:8px 10px; font-weight:650;
+  }
+  button.primary{background:var(--accent);color:#fff;border-color:var(--accent)}
+  button:active{transform:translateY(1px)}
+  .small{font-size:12px;color:var(--muted);line-height:1.35;margin-top:6px}
+  main{padding:10px 12px}
+  .canvasWrap{border:1px solid var(--line);border-radius:14px;overflow:hidden}
+  canvas{display:block;width:100%;height:72vh;background:#fff;touch-action:none}
+  textarea{
+    width:100%; min-height:160px; margin-top:10px;
+    border:1px solid var(--line); border-radius:12px; padding:10px;
+    font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; font-size:12px;
+  }
+  .pill{padding:6px 10px;border-radius:999px;border:1px solid var(--line);background:#fff;font-size:12px}
+</style>
+</head>
+<body>
+<header>
+  <div class="row">
+    <span class="pill">線文メーカー v0.1（iPad mini + Pencil向け）</span>
+    <select id="frame">
+      <option value="65">枠 65mm</option>
+      <option value="70" selected>枠 70mm</option>
+      <option value="72">枠 72mm</option>
+      <option value="75">枠 75mm</option>
+    </select>
+    <select id="origin">
+      <option value="center" selected>原点：中央</option>
+      <option value="bottomleft">原点：左下</option>
+    </select>
+    <label class="row" style="gap:6px">
+      <span class="small" style="margin:0">枠表示</span>
+      <input id="showFrame" type="checkbox" checked>
+    </label>
+    <label class="row" style="gap:6px">
+      <span class="small" style="margin:0">グリッド</span>
+      <input id="grid" type="checkbox" checked>
+    </label>
+  </div>
+  <div class="row" style="margin-top:8px">
+    <button id="undo">↩︎ 1ストローク戻す</button>
+    <button id="clear">🧽 全消去</button>
+    <button class="primary" id="export">線文を書き出し</button>
+    <button id="copy">コピー</button>
+  </div>
+  <div class="small">
+    ・Pencil/指で描けます（ペン優先）。ストロークは空行で区切って出力。<br>
+    ・まずは「枠70mm」で運用すると安全です😊
+  </div>
+</header>
+
+<main>
+  <div class="canvasWrap">
+    <canvas id="c" width="1600" height="1200"></canvas>
+  </div>
+  <textarea id="out" placeholder="ここに線文（x,y）が出ます"></textarea>
+</main>
+
+<script>
+const c = document.getElementById('c');
+const ctx = c.getContext('2d');
+const out = document.getElementById('out');
+
+const ui = {
+  frame: document.getElementById('frame'),
+  origin: document.getElementById('origin'),
+  showFrame: document.getElementById('showFrame'),
+  grid: document.getElementById('grid'),
+  undo: document.getElementById('undo'),
+  clear: document.getElementById('clear'),
+  export: document.getElementById('export'),
+  copy: document.getElementById('copy'),
+};
+
+let strokes = [];
+let cur = null;
+let drawing = false;
+
+const MIN_D = 2.2; // px
+
+function dist(a,b){ const dx=a.x-b.x, dy=a.y-b.y; return Math.hypot(dx,dy); }
+
+function drawGridAndFrame(){
+  ctx.clearRect(0,0,c.width,c.height);
+  ctx.fillStyle="#fff";
+  ctx.fillRect(0,0,c.width,c.height);
+
+  const frameMm = +ui.frame.value;
+  const short = Math.min(c.width, c.height);
+  const frameSizePx = short*0.85;
+  const fx = (c.width - frameSizePx)/2;
+  const fy = (c.height - frameSizePx)/2;
+
+  const pxPerMm = frameSizePx / frameMm;
+
+  if(ui.grid.checked){
+    ctx.strokeStyle="#eee"; ctx.lineWidth=1;
+    const stepMm = 5;
+    const stepPx = stepMm*pxPerMm;
+    for(let x=fx; x<=fx+frameSizePx+0.5; x+=stepPx){
+      ctx.beginPath(); ctx.moveTo(x, fy); ctx.lineTo(x, fy+frameSizePx); ctx.stroke();
+    }
+    for(let y=fy; y<=fy+frameSizePx+0.5; y+=stepPx){
+      ctx.beginPath(); ctx.moveTo(fx, y); ctx.lineTo(fx+frameSizePx, y); ctx.stroke();
+    }
+  }
+
+  if(ui.showFrame.checked){
+    ctx.strokeStyle="#bbb"; ctx.lineWidth=2;
+    ctx.strokeRect(fx,fy,frameSizePx,frameSizePx);
+    ctx.strokeStyle="#ddd"; ctx.lineWidth=1.5;
+    ctx.beginPath(); ctx.moveTo(fx+frameSizePx/2, fy); ctx.lineTo(fx+frameSizePx/2, fy+frameSizePx); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(fx, fy+frameSizePx/2); ctx.lineTo(fx+frameSizePx, fy+frameSizePx/2); ctx.stroke();
+  }
+
+  return {frameMm, frameSizePx, fx, fy, pxPerMm};
+}
+
+function redraw(){
+  drawGridAndFrame();
+  ctx.strokeStyle="#000"; ctx.lineWidth=3; ctx.lineCap="round"; ctx.lineJoin="round";
+  for(const s of strokes){
+    if(s.length<2) continue;
+    ctx.beginPath();
+    ctx.moveTo(s[0].x, s[0].y);
+    for(let i=1;i<s.length;i++) ctx.lineTo(s[i].x, s[i].y);
+    ctx.stroke();
+  }
+  if(cur && cur.length>=2){
+    ctx.beginPath();
+    ctx.moveTo(cur[0].x, cur[0].y);
+    for(let i=1;i<cur.length;i++) ctx.lineTo(cur[i].x, cur[i].y);
+    ctx.stroke();
+  }
+}
+
+function canvasPos(e){
+  const r = c.getBoundingClientRect();
+  const x = (e.clientX - r.left) * (c.width / r.width);
+  const y = (e.clientY - r.top)  * (c.height/ r.height);
+  return {x,y};
+}
+
+c.addEventListener('pointerdown', (e)=>{
+  e.preventDefault();
+  c.setPointerCapture(e.pointerId);
+  drawing = true;
+  cur = [];
+  cur.push(canvasPos(e));
+  redraw();
+});
+
+c.addEventListener('pointermove', (e)=>{
+  if(!drawing || !cur) return;
+  const p = canvasPos(e);
+  const last = cur[cur.length-1];
+  if(dist(p,last) >= MIN_D){
+    cur.push(p);
+    redraw();
+  }
+});
+
+function endStroke(){
+  if(cur && cur.length>=2) strokes.push(cur);
+  cur = null;
+  drawing = false;
+  redraw();
+}
+c.addEventListener('pointerup', (e)=> endStroke());
+c.addEventListener('pointercancel', (e)=> endStroke());
+
+ui.undo.addEventListener('click', ()=>{ strokes.pop(); redraw(); });
+ui.clear.addEventListener('click', ()=>{ strokes=[]; cur=null; out.value=""; redraw(); });
+
+function exportLineText(){
+  const meta = drawGridAndFrame();
+  const {frameMm, frameSizePx, fx, fy, pxPerMm} = meta;
+
+  function toMM(p){
+    const rx = (p.x - fx);
+    const ry = (p.y - fy);
+    let xmm = rx / pxPerMm;
+    let ymm = (frameSizePx - ry) / pxPerMm; // y up
+    if(ui.origin.value === "center"){
+      xmm -= frameMm/2;
+      ymm -= frameMm/2;
+    }
+    return [xmm, ymm];
+  }
+
+  const MIN_MM = 0.4;
+  let lines = [];
+  for(const s of strokes){
+    let prev=null;
+    for(const p of s){
+      const xy = toMM(p);
+      if(prev){
+        const d = Math.hypot(xy[0]-prev[0], xy[1]-prev[1]);
+        if(d < MIN_MM) continue;
+      }
+      prev=xy;
+      lines.push(`${xy[0].toFixed(2)},${xy[1].toFixed(2)}`);
+    }
+    lines.push("");
+  }
+  while(lines.length && lines[lines.length-1]==="") lines.pop();
+  out.value = lines.join("\n");
+}
+
+ui.export.addEventListener('click', exportLineText);
+
+ui.copy.addEventListener('click', async ()=>{
+  if(!out.value.trim()) exportLineText();
+  try{
+    await navigator.clipboard.writeText(out.value);
+    ui.copy.textContent="コピー済み";
+    setTimeout(()=>ui.copy.textContent="コピー", 900);
+  }catch(err){
+    out.focus(); out.select();
+    document.execCommand('copy');
+  }
+});
+
+for(const k of ["frame","origin","showFrame","grid"]){
+  ui[k].addEventListener('change', ()=>redraw());
+}
+
+redraw();
+</script>
+</body>
+</html>
