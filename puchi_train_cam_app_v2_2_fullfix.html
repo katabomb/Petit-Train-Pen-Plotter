@@ -1,0 +1,521 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1" />
+  <title>プチ電車ペンプロッタ2：完成図PNG＆3カムPNG（α/β/Z） v2.2</title>
+  <style>
+    :root{--bg:#0b0c10;--panel:#141722;--ink:#e9ecf1;--muted:#aab2c0;--line:#2a3142;--btn:#0f1220;--btn2:#0b2733;}
+    *{box-sizing:border-box}
+    body{margin:0;font-family:system-ui,-apple-system,"Segoe UI",Roboto,"Noto Sans JP",sans-serif;background:var(--bg);color:var(--ink)}
+    header{padding:12px 14px;border-bottom:1px solid var(--line)}
+    header h1{margin:0;font-size:15px}
+    header p{margin:6px 0 0;font-size:12px;color:var(--muted);line-height:1.4}
+    .wrap{display:grid;grid-template-columns:minmax(280px,390px) 1fr;gap:10px;padding:10px}
+    @media (max-width:900px){.wrap{grid-template-columns:1fr}}
+    .card{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:10px}
+    h2{margin:0 0 8px;font-size:13px;color:#dbe4ff}
+    label{display:block;font-size:11px;color:var(--muted);margin:0 0 4px}
+    input,textarea{width:100%;padding:7px 9px;border-radius:10px;border:1px solid var(--line);background:#0f1220;color:var(--ink);font-size:13px}
+    textarea{min-height:120px;resize:vertical;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+    .grid2{display:grid;grid-template-columns:1fr 1fr;gap:6px}
+    .row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+    button{padding:8px 10px;border-radius:12px;border:1px solid var(--line);background:var(--btn);color:var(--ink);font-weight:650;cursor:pointer}
+    button.primary{background:var(--btn2);border-color:#2b8ab1}
+    .small{font-size:11px;color:var(--muted);line-height:1.45}
+    .kpi{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12px;color:#d3f9d8;line-height:1.45}
+    .msg{font-size:12px;color:#ffd18a;line-height:1.4;margin-top:6px}
+    .canvasWrap{width:100%;aspect-ratio:3/4}
+    canvas{width:100%;height:100%;display:block;border-radius:12px;border:1px solid var(--line);background:#070812}
+    .three{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px}
+    @media (max-width:900px){.three{grid-template-columns:1fr}}
+  </style>
+</head>
+<body>
+<header>
+  <h1>プチ電車ペンプロッタ2：完成図PNG & 3カムPNG（α/β/Z） v2.2</h1>
+  <p>✅ iPhone対応（タップ再生）。線文→Zゲート→リンク機構アニメ→α/β/Zカム生成→PNG出力。※「再計算」で状態確定→「▶再生」で動きます😊</p>
+</header>
+
+<div class="wrap">
+  <section class="card">
+    <h2>1) 形（線文）</h2>
+    <div class="small">1行=1点「x,y」。空行でストローク区切り。単位mm。</div>
+    <textarea id="strokes"></textarea>
+    <div class="row" style="margin-top:8px;">
+      <button id="loadSquare">サンプル：75mm角（2ストローク）</button>
+      <button id="loadStar">サンプル：星（1ストローク）</button>
+      <button id="loadHilbert">サンプル：ヒルベルト風（多折れ）</button>
+    </div>
+
+    <h2 style="margin-top:12px;">2) 機構（XY）</h2>
+    <div class="grid2">
+      <div><label>アーム長 l (mm)</label><input id="l" type="number" value="90" step="1"></div>
+      <div><label>軌跡オフセット X0 (mm)</label><input id="x0" type="number" value="0" step="1"></div>
+      <div><label>軌跡オフセット Y0 (mm)</label><input id="y0" type="number" value="130" step="1"></div>
+      <div><label>1周サンプル点 N</label><input id="N" type="number" value="720" step="60"></div>
+    </div>
+
+    <h2 style="margin-top:12px;">3) Z（紙台 0/10mm）と余白</h2>
+    <div class="grid2">
+      <div><label>Zストローク (mm)</label><input id="zStroke" type="number" value="10" step="1"></div>
+      <div><label>待ち角（ペンOFF）(deg)</label><input id="waitDeg" type="number" value="15" step="1"></div>
+      <div><label>上げ角（ペンONへ）(deg)</label><input id="zUpDeg" type="number" value="6" step="1"></div>
+      <div><label>下げ角（ペンOFFへ）(deg)</label><input id="zDownDeg" type="number" value="3" step="1"></div>
+    </div>
+    <div class="small">※ Z動作中はXY停止（同一点に滞在）。待ち角は余白。</div>
+
+    <h2 style="margin-top:12px;">4) カム半径（印刷用）</h2>
+    <div class="grid2">
+      <div><label>XYカム Rmin (mm)</label><input id="RxyMin" type="number" value="39" step="1"></div>
+      <div><label>XYカム Rmax (mm)</label><input id="RxyMax" type="number" value="60" step="1"></div>
+      <div><label>Zカム Rmin (mm)</label><input id="RzMin" type="number" value="30" step="1"></div>
+      <div><label>Zカム Rmax (mm)</label><input id="RzMax" type="number" value="40" step="1"></div>
+      <div><label>平滑化（移動平均）窓(点)</label><input id="smoothWin" type="number" value="9" step="2"></div>
+      <div class="row" style="align-self:end;gap:6px;">
+        <label style="margin:0;">平滑化ON</label><input id="smoothOn" type="checkbox" checked>
+      </div>
+    </div>
+
+    <div class="row" style="margin-top:10px;">
+      <button class="primary" id="recalc">再計算</button>
+      <button class="primary" id="play">▶ 再生</button>
+      <button id="pause">⏸ 停止</button>
+    </div>
+    <div class="kpi" id="kpi" style="margin-top:8px;">—</div>
+    <div class="msg" id="msg"></div>
+
+    <h2 style="margin-top:12px;">PNG出力</h2>
+    <div class="row">
+      <button id="dlPngDraw">完成図PNG</button>
+      <button id="dlPngA">αカムPNG</button>
+      <button id="dlPngB">βカムPNG</button>
+      <button id="dlPngZ">ZカムPNG</button>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>アーム＋軌跡（アニメ）</h2>
+    <div class="canvasWrap"><canvas id="anim" width="900" height="1200"></canvas></div>
+    <div class="small">点線＝目標（ペンONのみ）、実線＝軌跡（ペンONのみ）。ペン点が薄い時はZ=OFF。</div>
+
+    <div class="three" style="margin-top:10px;">
+      <div class="card" style="padding:8px;">
+        <h2 style="margin-bottom:6px;">αカム</h2>
+        <div class="canvasWrap" style="aspect-ratio:1/1;"><canvas id="camA" width="900" height="900"></canvas></div>
+      </div>
+      <div class="card" style="padding:8px;">
+        <h2 style="margin-bottom:6px;">βカム</h2>
+        <div class="canvasWrap" style="aspect-ratio:1/1;"><canvas id="camB" width="900" height="900"></canvas></div>
+      </div>
+      <div class="card" style="padding:8px;">
+        <h2 style="margin-bottom:6px;">Zカム</h2>
+        <div class="canvasWrap" style="aspect-ratio:1/1;"><canvas id="camZ" width="900" height="900"></canvas></div>
+      </div>
+    </div>
+  </section>
+</div>
+
+<script>
+const TAU=Math.PI*2;
+const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
+const lerp=(a,b,t)=>a+(b-a)*t;
+
+const el={
+  strokes:document.getElementById('strokes'),
+  l:document.getElementById('l'),
+  x0:document.getElementById('x0'),
+  y0:document.getElementById('y0'),
+  N:document.getElementById('N'),
+  zStroke:document.getElementById('zStroke'),
+  waitDeg:document.getElementById('waitDeg'),
+  zUpDeg:document.getElementById('zUpDeg'),
+  zDownDeg:document.getElementById('zDownDeg'),
+  RxyMin:document.getElementById('RxyMin'),
+  RxyMax:document.getElementById('RxyMax'),
+  RzMin:document.getElementById('RzMin'),
+  RzMax:document.getElementById('RzMax'),
+  smoothWin:document.getElementById('smoothWin'),
+  smoothOn:document.getElementById('smoothOn'),
+  kpi:document.getElementById('kpi'),
+  msg:document.getElementById('msg'),
+  anim:document.getElementById('anim'),
+  camA:document.getElementById('camA'),
+  camB:document.getElementById('camB'),
+  camZ:document.getElementById('camZ'),
+};
+const setMsg=s=>el.msg.textContent=s||"";
+
+function parseStrokes(text){
+  const lines=text.split(/\r?\n/);
+  const strokes=[];
+  let cur=[];
+  for(const ln of lines){
+    const s=ln.trim();
+    if(!s){
+      if(cur.length>=2) strokes.push(cur);
+      cur=[];
+      continue;
+    }
+    const p=s.split(',').map(v=>+v.trim());
+    if(p.length===2 && Number.isFinite(p[0]) && Number.isFinite(p[1])) cur.push([p[0],p[1]]);
+  }
+  if(cur.length>=2) strokes.push(cur);
+  return strokes;
+}
+function polyLength(poly){
+  let L=0;
+  for(let i=1;i<poly.length;i++) L+=Math.hypot(poly[i][0]-poly[i-1][0], poly[i][1]-poly[i-1][1]);
+  return L;
+}
+function resamplePolyline(poly,n){
+  const seg=[]; let total=0;
+  for(let i=1;i<poly.length;i++){
+    const d=Math.hypot(poly[i][0]-poly[i-1][0], poly[i][1]-poly[i-1][1]);
+    seg.push(d); total+=d;
+  }
+  if(total===0) return Array.from({length:n},()=>poly[0].slice());
+  const out=[poly[0].slice()];
+  const step=total/(n-1);
+  let acc=0, i=0, target=step;
+  while(out.length<n-1){
+    const d=seg[i], q=poly[i+1];
+    if(acc+d>=target){
+      const t=(target-acc)/d;
+      out.push([lerp(poly[i][0],q[0],t), lerp(poly[i][1],q[1],t)]);
+      target+=step;
+    }else{
+      acc+=d; i++; if(i>=seg.length) break;
+    }
+  }
+  out.push(poly[poly.length-1].slice());
+  return out;
+}
+function smoothCircular(arr,win){
+  win=Math.max(1,Math.floor(win));
+  if(win<=1) return arr.slice();
+  const n=arr.length, half=Math.floor(win/2);
+  const out=new Array(n).fill(0);
+  for(let i=0;i<n;i++){
+    let s=0;
+    for(let k=-half;k<=half;k++) s+=arr[(i+k+n)%n];
+    out[i]=s/(2*half+1);
+  }
+  return out;
+}
+function unwrap(arr){
+  const out=arr.slice();
+  for(let pass=0;pass<2;pass++){
+    for(let i=1;i<out.length;i++){
+      const d=out[i]-out[i-1];
+      if(d>Math.PI) out[i]-=TAU;
+      if(d<-Math.PI) out[i]+=TAU;
+    }
+  }
+  return out;
+}
+
+function buildCycle(strokes,N,{x0,y0,waitDeg,zUpDeg,zDownDeg,zStroke}){
+  const waitSteps=Math.max(1,Math.round(N*(waitDeg/360)));
+  const upSteps=Math.max(1,Math.round(N*(zUpDeg/360)));
+  const downSteps=Math.max(1,Math.round(N*(zDownDeg/360)));
+
+  const strokeResampled=strokes.map(st=>{
+    const L=polyLength(st);
+    const k=Math.max(20,Math.round(L));
+    return resamplePolyline(st,k);
+  });
+
+  let home=null, best=1e18;
+  for(const st of strokeResampled){
+    for(const p of st){
+      const x=p[0]+x0, y=p[1]+y0;
+      const r=x*x+y*y;
+      if(r<best){best=r; home=[x,y];}
+    }
+  }
+  if(!home) home=[x0,y0];
+
+  const segs=[];
+  segs.push({z:0, pts:Array.from({length:waitSteps},()=>home)});
+
+  for(const st0 of strokeResampled){
+    const st=st0.map(p=>[p[0]+x0,p[1]+y0]);
+    const start=st[0], end=st[st.length-1];
+    const prev=segs[segs.length-1].pts.slice(-1)[0];
+    const dTravel=Math.hypot(start[0]-prev[0], start[1]-prev[1]);
+    if(dTravel>1e-6) segs.push({z:0, pts:resamplePolyline([prev,start], Math.max(5,Math.round(dTravel)))});
+    segs.push({z:"up", pts:Array.from({length:upSteps},()=>start)});
+    segs.push({z:1, pts:st});
+    segs.push({z:"down", pts:Array.from({length:downSteps},()=>end)});
+  }
+  const last=segs[segs.length-1].pts.slice(-1)[0];
+  const dBack=Math.hypot(home[0]-last[0], home[1]-last[1]);
+  if(dBack>1e-6) segs.push({z:0, pts:resamplePolyline([last,home], Math.max(5,Math.round(dBack)))});
+
+  const flatPts=[], flatZ=[];
+  for(const s of segs){
+    if(s.z===0||s.z===1){
+      for(const p of s.pts){ flatPts.push(p); flatZ.push(s.z*zStroke); }
+    }else if(s.z==="up"){
+      const m=s.pts.length;
+      for(let i=0;i<m;i++){ const t=i/(m-1||1); flatPts.push(s.pts[i]); flatZ.push(t*zStroke); }
+    }else if(s.z==="down"){
+      const m=s.pts.length;
+      for(let i=0;i<m;i++){ const t=i/(m-1||1); flatPts.push(s.pts[i]); flatZ.push((1-t)*zStroke); }
+    }
+  }
+
+  const M=flatPts.length;
+  const ptsOut=[], zOut=[];
+  for(let i=0;i<N;i++){
+    const tt=(i/(N-1))*(M-1);
+    const k=Math.floor(tt), f=tt-k, k2=Math.min(M-1,k+1);
+    ptsOut.push([lerp(flatPts[k][0],flatPts[k2][0],f), lerp(flatPts[k][1],flatPts[k2][1],f)]);
+    zOut.push(lerp(flatZ[k],flatZ[k2],f));
+  }
+  return {pts:ptsOut, z:zOut};
+}
+
+let state=null, playing=false, tIndex=0, raf=null;
+
+function worldToCanvas(x,y,box,W,H){
+  const px=(x-box.xmin)/(box.xmax-box.xmin)*W;
+  const py=H-(y-box.ymin)/(box.ymax-box.ymin)*H;
+  return [px,py];
+}
+
+function renderPlaceholders(){
+  el.kpi.textContent="—";
+  for(const cv of [el.anim,el.camA,el.camB,el.camZ]){
+    const c=cv.getContext('2d'); c.clearRect(0,0,cv.width,cv.height);
+  }
+}
+
+function renderCam(canvas,R,rmin,rmax){
+  const ctx=canvas.getContext('2d');
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+  const margin=24;
+  const scale=(canvas.width/2-margin)/(rmax);
+  const cx=canvas.width/2, cy=canvas.height/2;
+  const toXY=(r,th)=>[cx+r*Math.cos(th)*scale, cy-r*Math.sin(th)*scale];
+
+  ctx.strokeStyle="rgba(255,255,255,0.08)"; ctx.lineWidth=2;
+  for(const rr of [rmin,(rmin+rmax)/2,rmax]){ ctx.beginPath(); ctx.arc(cx,cy,rr*scale,0,TAU); ctx.stroke(); }
+
+  ctx.strokeStyle="rgba(125,211,252,0.95)"; ctx.lineWidth=4;
+  ctx.beginPath();
+  for(let i=0;i<R.length;i++){
+    const th=TAU*i/R.length;
+    const [x,y]=toXY(R[i],th);
+    if(i===0) ctx.moveTo(x,y); else ctx.lineTo(x,y);
+  }
+  ctx.closePath(); ctx.stroke();
+}
+
+function renderAnimFrame(){
+  const c=el.anim, ctx=c.getContext('2d');
+  ctx.clearRect(0,0,c.width,c.height);
+  const box={xmin:-120,xmax:120,ymin:-10,ymax:220};
+
+  ctx.strokeStyle="rgba(255,255,255,0.06)"; ctx.lineWidth=1;
+  for(let gx=-120;gx<=120;gx+=20){
+    const [x1,y1]=worldToCanvas(gx,box.ymin,box,c.width,c.height);
+    const [x2,y2]=worldToCanvas(gx,box.ymax,box,c.width,c.height);
+    ctx.beginPath(); ctx.moveTo(x1,y1); ctx.lineTo(x2,y2); ctx.stroke();
+  }
+  for(let gy=-10;gy<=220;gy+=20){
+    const [x1,y1]=worldToCanvas(box.xmin,gy,box,c.width,c.height);
+    const [x2,y2]=worldToCanvas(box.xmax,gy,box,c.width,c.height);
+    ctx.beginPath(); ctx.moveTo(x1,y1); ctx.lineTo(x2,y2); ctx.stroke();
+  }
+
+  // target (ON only)
+  ctx.setLineDash([10,10]);
+  ctx.strokeStyle="rgba(200,200,200,0.30)"; ctx.lineWidth=2;
+  ctx.beginPath();
+  let started=false;
+  for(let i=0;i<state.N;i++){
+    if(state.z[i]<=0.001) continue;
+    const [x,y]=state.M[i];
+    const [px,py]=worldToCanvas(x,y,box,c.width,c.height);
+    if(!started){ctx.moveTo(px,py); started=true;} else ctx.lineTo(px,py);
+  }
+  if(started) ctx.stroke();
+  ctx.setLineDash([]);
+
+  // drawn
+  ctx.strokeStyle="rgba(125,211,252,0.95)"; ctx.lineWidth=2;
+  ctx.beginPath(); started=false;
+  for(let i=0;i<=tIndex;i++){
+    if(state.z[i]<=0.001) continue;
+    const [x,y]=state.M[i];
+    const [px,py]=worldToCanvas(x,y,box,c.width,c.height);
+    if(!started){ctx.moveTo(px,py); started=true;} else ctx.lineTo(px,py);
+  }
+  if(started) ctx.stroke();
+
+  const O=[0,0], A=state.A[tIndex], B=state.B[tIndex], M=state.M[tIndex];
+  const seg=(p,q,color)=>{
+    ctx.strokeStyle=color; ctx.lineWidth=5;
+    const [px,py]=worldToCanvas(p[0],p[1],box,c.width,c.height);
+    const [qx,qy]=worldToCanvas(q[0],q[1],box,c.width,c.height);
+    ctx.beginPath(); ctx.moveTo(px,py); ctx.lineTo(qx,qy); ctx.stroke();
+  };
+  seg(O,A,"#60a5fa"); seg(O,B,"#fb923c"); seg(A,M,"#22c55e"); seg(B,M,"#ef4444");
+
+  const dot=(p,color,r=8)=>{
+    const [px,py]=worldToCanvas(p[0],p[1],box,c.width,c.height);
+    ctx.fillStyle=color; ctx.beginPath(); ctx.arc(px,py,r,0,TAU); ctx.fill();
+  };
+  dot(O,"#b45309",7); dot(A,"#60a5fa",7); dot(B,"#fb923c",7);
+  dot(M, state.z[tIndex]>0.001 ? "#f43f5e" : "rgba(244,63,94,0.35)", 9);
+};
+
+function renderAll(){
+  renderAnimFrame();
+  renderCam(el.camA,state.Ra,state.RxyMin,state.RxyMax);
+  renderCam(el.camB,state.Rb,state.RxyMin,state.RxyMax);
+  renderCam(el.camZ,state.Rz,state.RzMin,state.RzMax);
+  const s=state.stats, deg=v=>v*180/Math.PI;
+  el.kpi.textContent=`min(Ay)=${s.minAy.toFixed(1)}mm  min(By)=${s.minBy.toFixed(1)}mm  max|OM|=${s.maxReach.toFixed(1)}mm  α=${deg(s.alphaMin).toFixed(1)}..${deg(s.alphaMax).toFixed(1)}°  β=${deg(s.betaMin).toFixed(1)}..${deg(s.betaMax).toFixed(1)}°  Z=${s.zMin.toFixed(1)}..${s.zMax.toFixed(1)}mm`;
+}
+
+function computeAll(){
+  const strokes=parseStrokes(el.strokes.value);
+  if(strokes.length===0){ setMsg("線文が空です。サンプルを押すか、x,yを入力してください。"); state=null; renderPlaceholders(); return false; }
+  setMsg("");
+
+  const l=+el.l.value, x0=+el.x0.value, y0=+el.y0.value;
+  const N=Math.max(240,Math.floor(+el.N.value));
+  const zStroke=+el.zStroke.value, waitDeg=+el.waitDeg.value, zUpDeg=+el.zUpDeg.value, zDownDeg=+el.zDownDeg.value;
+  const RxyMin=+el.RxyMin.value, RxyMax=+el.RxyMax.value, RzMin=+el.RzMin.value, RzMax=+el.RzMax.value;
+  const smoothOn=el.smoothOn.checked, smoothWin=Math.max(1,Math.floor(+el.smoothWin.value));
+
+  const cyc=buildCycle(strokes,N,{x0,y0,waitDeg,zUpDeg,zDownDeg,zStroke});
+  const M=cyc.pts, z=cyc.z;
+
+  const alpha=new Array(N), beta=new Array(N), A=new Array(N), B=new Array(N);
+  let minAy=1e9, minBy=1e9, maxReach=-1e9;
+
+  for(let i=0;i<N;i++){
+    const x=M[i][0], yM=M[i][1];
+    const rho=Math.hypot(x,yM);
+    maxReach=Math.max(maxReach,rho);
+    const phi=Math.atan2(yM,x);
+    const rhoC=Math.min(rho,2*l-1e-6);
+    const gamma=Math.acos(rhoC/(2*l));
+    const a=phi+gamma, b=phi-gamma;
+    alpha[i]=a; beta[i]=b;
+    const Ax=l*Math.cos(a), Ay=l*Math.sin(a);
+    const Bx=l*Math.cos(b), By=l*Math.sin(b);
+    A[i]=[Ax,Ay]; B[i]=[Bx,By];
+    minAy=Math.min(minAy,Ay); minBy=Math.min(minBy,By);
+  }
+
+  const au=unwrap(alpha), bu=unwrap(beta);
+  const mapToRadius=(u,rmin,rmax)=>{
+    let mn=1e9,mx=-1e9;
+    for(const v of u){mn=Math.min(mn,v);mx=Math.max(mx,v);}
+    const out=u.map(v=>{const t=(v-mn)/(mx-mn||1); return rmin+(rmax-rmin)*t;});
+    return {out,mn,mx};
+  };
+  const Amap=mapToRadius(au,RxyMin,RxyMax);
+  const Bmap=mapToRadius(bu,RxyMin,RxyMax);
+  let Ra=Amap.out, Rb=Bmap.out;
+  if(smoothOn){Ra=smoothCircular(Ra,smoothWin); Rb=smoothCircular(Rb,smoothWin);}
+
+  let Rz=z.map(v=>{const t=clamp(v/(zStroke||1),0,1); return RzMin+(RzMax-RzMin)*t;});
+  if(smoothOn) Rz=smoothCircular(Rz,smoothWin);
+
+  state={N,l,M,z,A,B,alpha:au,beta:bu,Ra,Rb,Rz,RxyMin,RxyMax,RzMin,RzMax,
+    stats:{minAy,minBy,maxReach,alphaMin:Amap.mn,alphaMax:Amap.mx,betaMin:Bmap.mn,betaMax:Bmap.mx,zMin:Math.min(...z),zMax:Math.max(...z)}};
+  tIndex=0;
+  renderAll();
+  return true;
+}
+
+function tick(){
+  if(!playing||!state) return;
+  tIndex=(tIndex+1)%state.N;
+  renderAnimFrame();
+  raf=requestAnimationFrame(tick);
+}
+
+document.getElementById('recalc').addEventListener('click', ()=>{playing=false; if(raf) cancelAnimationFrame(raf); raf=null; computeAll();});
+document.getElementById('play').addEventListener('click', ()=>{ if(!state){ if(!computeAll()) return; } playing=true; if(raf) cancelAnimationFrame(raf); raf=requestAnimationFrame(tick); });
+document.getElementById('pause').addEventListener('click', ()=>{playing=false; if(raf) cancelAnimationFrame(raf); raf=null;});
+
+function downloadCanvasPNG(canvas, filename){
+  const url=canvas.toDataURL("image/png");
+  const a=document.createElement('a'); a.href=url; a.download=filename;
+  document.body.appendChild(a); a.click(); a.remove();
+}
+document.getElementById('dlPngA').addEventListener('click', ()=>state?downloadCanvasPNG(el.camA,"cam_alpha.png"):setMsg("先に再計算してください。"));
+document.getElementById('dlPngB').addEventListener('click', ()=>state?downloadCanvasPNG(el.camB,"cam_beta.png"):setMsg("先に再計算してください。"));
+document.getElementById('dlPngZ').addEventListener('click', ()=>state?downloadCanvasPNG(el.camZ,"cam_z.png"):setMsg("先に再計算してください。"));
+document.getElementById('dlPngDraw').addEventListener('click', ()=>{
+  if(!state){setMsg("先に再計算してください。"); return;}
+  const W=1200,H=1200; const tmp=document.createElement('canvas'); tmp.width=W; tmp.height=H;
+  const ctx=tmp.getContext('2d'); ctx.fillStyle="white"; ctx.fillRect(0,0,W,H);
+
+  let xmin=1e9,xmax=-1e9,ymin=1e9,ymax=-1e9;
+  for(let i=0;i<state.N;i++){
+    if(state.z[i]<=0.001) continue;
+    const [x,y]=state.M[i];
+    xmin=Math.min(xmin,x); xmax=Math.max(xmax,x);
+    ymin=Math.min(ymin,y); ymax=Math.max(ymax,y);
+  }
+  const pad=20;
+  if(!(xmin<xmax && ymin<ymax)){ xmin=-50; xmax=50; ymin=-50; ymax=50; }
+  xmin-=pad; ymin-=pad; xmax+=pad; ymax+=pad;
+  const box={xmin,xmax,ymin,ymax};
+
+  ctx.strokeStyle="black"; ctx.lineWidth=2;
+  ctx.beginPath(); let started=false;
+  for(let i=0;i<state.N;i++){
+    if(state.z[i]<=0.001) continue;
+    const [x,y]=state.M[i];
+    const [px,py]=worldToCanvas(x,y,box,W,H);
+    if(!started){ctx.moveTo(px,py); started=true;} else ctx.lineTo(px,py);
+  }
+  if(started) ctx.stroke();
+  downloadCanvasPNG(tmp,"final_drawing.png");
+});
+
+// samples
+function setTextAndCompute(text){ el.strokes.value=text; computeAll(); }
+document.getElementById('loadSquare').addEventListener('click', ()=>{
+  const a=37.5,b=25, pts=[];
+  for(const p of [[-a,-a],[a,-a],[a,a],[-a,a],[-a,-a]]) pts.push(p.join(","));
+  pts.push("");
+  for(const p of [[-b,-b],[b,-b],[b,b],[-b,b],[-b,-b]]) pts.push(p.join(","));
+  setTextAndCompute(pts.join("\n"));
+});
+document.getElementById('loadStar').addEventListener('click', ()=>{
+  const Rout=40,Rin=18,k=5,NN=220, pts=[];
+  for(let i=0;i<=NN;i++){
+    const th=TAU*i/NN;
+    const rho=Rin+(Rout-Rin)*0.5*(1+Math.cos(k*th));
+    pts.push([rho*Math.cos(th), rho*Math.sin(th)].map(v=>v.toFixed(2)).join(","));
+  }
+  setTextAndCompute(pts.join("\n"));
+});
+document.getElementById('loadHilbert').addEventListener('click', ()=>{
+  const s=70, pts=[], path=[[-s/2,-s/2],[-s/2,s/2],[0,s/2],[0,0],[s/2,0],[s/2,s/2],[s/2,-s/2],[0,-s/2],[0,0],[-s/2,0],[-s/2,-s/2]];
+  for(const p of path) pts.push(p.join(","));
+  setTextAndCompute(pts.join("\n"));
+});
+
+// init: fill sample first, then compute (no empty-state)
+(()=>{
+  const a=37.5,b=25, pts=[];
+  for(const p of [[-a,-a],[a,-a],[a,a],[-a,a],[-a,-a]]) pts.push(p.join(","));
+  pts.push("");
+  for(const p of [[-b,-b],[b,-b],[b,b],[-b,b],[-b,-b]]) pts.push(p.join(","));
+  el.strokes.value=pts.join("\n");
+  computeAll();
+})();
+</script>
+</body>
+</html>
