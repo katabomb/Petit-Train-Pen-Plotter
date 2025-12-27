@@ -1,207 +1,245 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="ja">
 <head>
-<meta charset="UTF-8">
-<title>プチ電車ペンプロッタ ABZ カム生成</title>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>菱形4節リンク ABZ ビューア（破綻前モデル固定）</title>
 <style>
-  body {
-    margin: 0;
-    background: #fff;
-    font-family: system-ui, sans-serif;
-    color: #222;
-  }
-  .wrap {
-    display: grid;
-    grid-template-columns: 320px 1fr;
-    gap: 8px;
-    padding: 8px;
-  }
-  textarea {
-    width: 100%;
-    height: 260px;
-    font-family: monospace;
-    font-size: 12px;
-  }
-  canvas {
-    background: #fff;
-    border: 1px solid #ccc;
-  }
-  button {
-    margin: 4px 4px 4px 0;
-  }
+  :root{ --fg:#222; --muted:#666; --line:#111; --travel:#bbb; --draw:#1a5cff; --bg:#fff; }
+  body{ margin:0; font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif; background:var(--bg); color:var(--fg); }
+  .wrap{ display:grid; grid-template-columns: 360px 1fr; gap:10px; padding:10px; }
+  @media (max-width: 980px){ .wrap{ grid-template-columns: 1fr; } }
+  textarea{ width:100%; height:260px; font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; font-size:12px; }
+  .row{ display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
+  label{ font-size:12px; color:var(--muted); }
+  input[type="number"]{ width:92px; padding:6px; }
+  button{ padding:8px 10px; }
+  canvas{ width:100%; max-width: 920px; aspect-ratio: 3/2; border:1px solid #ccc; background:#fff; touch-action:none; }
+  .small{ font-size:12px; color:var(--muted); line-height:1.35; }
+  .warn{ color:#b00020; font-weight:600; }
 </style>
 </head>
-
 <body>
 <div class="wrap">
   <div>
-    <h3>α,β,z 線文</h3>
-    <textarea id="ta"></textarea><br>
-    <button onclick="recalc()">再計算</button>
-    <button onclick="togglePlay()">再生</button>
+    <h3 style="margin:6px 0 8px;">ABZ 線文</h3>
+    <div class="row">
+      <label>l(mm) <input id="lArm" type="number" value="90" min="20" max="200" step="1"/></label>
+      <label>行数上限 <input id="maxN" type="number" value="360" min="10" max="2000" step="10"/></label>
+    </div>
+    <textarea id="ta"></textarea>
+    <div class="row" style="margin-top:6px;">
+      <button id="btnRecalc">再計算</button>
+      <button id="btnPlay">再生</button>
+      <button id="btnStop">停止</button>
+      <button id="btnSampleSq">サンプル</button>
+    </div>
+    <div class="small" style="margin-top:8px;">
+      <div>モデル固定：<b>O→A</b> と <b>O→B</b> は長さ l、角は α・β。ペンPは <b>円(A,l)</b> と <b>円(B,l)</b> の交点のうち <b>上側</b>。</div>
+      <div>表示：描画(z=1)=青、移動(z=0)=薄灰。</div>
+      <div id="msg" class="warn" style="margin-top:6px;"></div>
+    </div>
   </div>
 
   <div>
-    <canvas id="cvAnim" width="600" height="400"></canvas><br>
-    <canvas id="cvCamA" width="200" height="200"></canvas>
-    <canvas id="cvCamB" width="200" height="200"></canvas>
-    <canvas id="cvCamZ" width="200" height="200"></canvas>
+    <h3 style="margin:6px 0 8px;">リンク＋軌跡（常に全部見える）</h3>
+    <canvas id="cv" width="900" height="600"></canvas>
   </div>
 </div>
 
 <script>
-/* ===== 基本設定 ===== */
-const l = 90; // アーム長
-let playing = false;
-let t = 0;
-let samples = [];
+const $=id=>document.getElementById(id);
+function deg2rad(d){ return d*Math.PI/180; }
 
-/* ===== サンプル線文 ===== */
-function sampleSquare(){
-  return `
--45,45,0
--45,45,1
-45,45,1
-45,45,0
-45,-45,0
-45,-45,1
--45,-45,1
--45,-45,0
--45,45,0
-`.trim();
+function parseABZ(text, maxN){
+  const out=[];
+  const lines=text.split(/\r?\n/);
+  for(const raw of lines){
+    const line=raw.trim();
+    if(!line) continue;
+    const parts=line.split(/[,\s]+/).map(x=>x.trim()).filter(Boolean);
+    if(parts.length<2) continue;
+    const a=parseFloat(parts[0]);
+    const b=parseFloat(parts[1]);
+    const z=parts.length>=3 ? parseInt(parts[2],10) : 1;
+    if(!Number.isFinite(a) || !Number.isFinite(b)) continue;
+    out.push({a,b,z: z?1:0});
+    if(out.length>=maxN) break;
+  }
+  return out;
 }
 
-/* ===== ABZ パース ===== */
-function parseABZ(text){
-  return text.split(/\n+/).map(line=>{
-    const [a,b,z]=line.split(",").map(Number);
-    if(isNaN(a)||isNaN(b)||isNaN(z)) return null;
-    return {a,b,z};
-  }).filter(v=>v);
+// Fixed rhombus model: O=(0,0), A,B are endpoints of length-l arms at angles a,b.
+// P is intersection of circle(A,l) and circle(B,l) with larger y.
+function poseFromAB(aDeg,bDeg,l){
+  const a=deg2rad(aDeg), b=deg2rad(bDeg);
+  const O={x:0,y:0};
+  const A={x:l*Math.cos(a), y:l*Math.sin(a)};
+  const B={x:l*Math.cos(b), y:l*Math.sin(b)};
+  const dx=B.x-A.x, dy=B.y-A.y;
+  const d=Math.hypot(dx,dy);
+  if(d===0) return {ok:false, reason:"AとBが一致して交点が定まりません", O,A,B,P:null};
+  if(d>2*l+1e-9) return {ok:false, reason:"|AB| > 2l で円が交わりません（破綻）", O,A,B,P:null};
+  const M={x:(A.x+B.x)/2, y:(A.y+B.y)/2};
+  const h2=l*l-(d/2)*(d/2);
+  const h=Math.sqrt(Math.max(0,h2));
+  const ux=-dy/d, uy=dx/d;
+  const P1={x:M.x + h*ux, y:M.y + h*uy};
+  const P2={x:M.x - h*ux, y:M.y - h*uy};
+  const P=(P1.y>=P2.y)?P1:P2;
+  return {ok:true, reason:"", O,A,B,P};
 }
 
-/* ===== ペン位置計算（機構） ===== */
-function penXY(a,b){
-  const A = a*Math.PI/180;
-  const B = b*Math.PI/180;
-  const Ax = l*Math.cos(A), Ay = l*Math.sin(A);
-  const Bx = l*Math.cos(B), By = l*Math.sin(B);
-  return {
-    Ax,Ay,Bx,By,
-    x:(Ax+Bx)/2,
-    y:(Ay+By)/2
-  };
+let state={ rows:[], poses:[], t:0, playing:false, bbox:null };
+
+function compute(){
+  const l=parseFloat($('lArm').value)||90;
+  const maxN=parseInt($('maxN').value||360,10);
+  const rows=parseABZ($('ta').value, maxN);
+  const poses=[];
+  let msg="";
+  for(let i=0;i<rows.length;i++){
+    const r=rows[i];
+    const p=poseFromAB(r.a,r.b,l);
+    if(!p.ok && !msg) msg=`行${i+1}: ${p.reason}（a=${r.a}, b=${r.b}）`;
+    poses.push(p);
+  }
+  $('msg').textContent=msg;
+  state.rows=rows;
+  state.poses=poses;
+  state.t=0;
+
+  let xmin=Infinity,xmax=-Infinity,ymin=Infinity,ymax=-Infinity;
+  function add(pt){
+    xmin=Math.min(xmin,pt.x); xmax=Math.max(xmax,pt.x);
+    ymin=Math.min(ymin,pt.y); ymax=Math.max(ymax,pt.y);
+  }
+  for(const p of poses){
+    add(p.O); add(p.A); add(p.B);
+    if(p.ok) add(p.P);
+  }
+  if(!isFinite(xmin)){ xmin=-1; xmax=1; ymin=-1; ymax=1; }
+  const pad=0.12*Math.max(xmax-xmin,ymax-ymin,l);
+  xmin-=pad; xmax+=pad; ymin-=pad; ymax+=pad;
+  state.bbox={xmin,xmax,ymin,ymax};
+  draw();
 }
 
-/* ===== 再計算 ===== */
-function recalc(){
-  samples = parseABZ(ta.value);
-  t = 0;
-  drawAll();
-}
+function draw(){
+  const cv=$('cv');
+  const ctx=cv.getContext('2d');
+  const W=cv.width,H=cv.height;
+  ctx.clearRect(0,0,W,H);
+  ctx.fillStyle="#fff"; ctx.fillRect(0,0,W,H);
 
-/* ===== 描画 ===== */
-function drawAll(){
-  drawAnim();
-  drawCam(cvCamA, s=>s.a);
-  drawCam(cvCamB, s=>s.b);
-  drawCam(cvCamZ, s=>s.z?40:60);
-}
+  if(state.rows.length===0){
+    ctx.fillStyle="#444"; ctx.font="16px system-ui";
+    ctx.fillText("線文が空です（サンプルを押すか貼り付けてください）", 20, 40);
+    return;
+  }
 
-function drawAnim(){
-  const ctx=cvAnim.getContext("2d");
-  ctx.clearRect(0,0,cvAnim.width,cvAnim.height);
-
-  if(samples.length===0) return;
-
-  // 表示固定：原点下中央
-  const xmin=-2*l, xmax=2*l;
-  const ymin=0, ymax=2*l;
-  const sx=cvAnim.width/(xmax-xmin);
-  const sy=cvAnim.height/(ymax-ymin);
+  const {xmin,xmax,ymin,ymax}=state.bbox;
+  const sx=W/(xmax-xmin), sy=H/(ymax-ymin);
   const s=Math.min(sx,sy);
-
-  const ox=(cvAnim.width-(xmax-xmin)*s)/2 - xmin*s;
-  const oy=cvAnim.height - ymin*s;
-
+  const ox=(W-(xmax-xmin)*s)/2 - xmin*s;
+  const oy=(H-(ymax-ymin)*s)/2 + ymax*s;
   const tx=x=>x*s+ox;
   const ty=y=>oy-y*s;
 
-  // 軌跡
+  // grid
+  ctx.strokeStyle="#eee"; ctx.lineWidth=1;
+  const step=10;
+  const gx0=Math.floor(xmin/step)*step, gx1=Math.ceil(xmax/step)*step;
+  const gy0=Math.floor(ymin/step)*step, gy1=Math.ceil(ymax/step)*step;
+  for(let x=gx0;x<=gx1;x+=step){
+    ctx.beginPath(); ctx.moveTo(tx(x),ty(gy0)); ctx.lineTo(tx(x),ty(gy1)); ctx.stroke();
+  }
+  for(let y=gy0;y<=gy1;y+=step){
+    ctx.beginPath(); ctx.moveTo(tx(gx0),ty(y)); ctx.lineTo(tx(gx1),ty(y)); ctx.stroke();
+  }
+
+  // trajectory
   ctx.lineWidth=2;
-  for(let i=1;i<samples.length;i++){
-    const p0=penXY(samples[i-1].a,samples[i-1].b);
-    const p1=penXY(samples[i].a,samples[i].b);
-    ctx.strokeStyle=samples[i].z?"#1a5cff":"#aaa";
+  for(let i=1;i<state.poses.length;i++){
+    const p0=state.poses[i-1], p1=state.poses[i];
+    if(!(p0.ok && p1.ok)) continue;
+    ctx.strokeStyle = state.rows[i].z ? "#1a5cff" : "#bbb";
     ctx.beginPath();
-    ctx.moveTo(tx(p0.x),ty(p0.y));
-    ctx.lineTo(tx(p1.x),ty(p1.y));
+    ctx.moveTo(tx(p0.P.x),ty(p0.P.y));
+    ctx.lineTo(tx(p1.P.x),ty(p1.P.y));
     ctx.stroke();
   }
 
-  const cur = samples[Math.floor(t)%samples.length];
-  const p = penXY(cur.a,cur.b);
+  const idx=Math.floor(state.t)%state.rows.length;
+  const row=state.rows[idx];
+  const pose=state.poses[idx];
 
-  // アーム
-  ctx.strokeStyle="#000";
-  ctx.lineWidth=3;
+  // origin
+  ctx.fillStyle="#000";
+  ctx.beginPath(); ctx.arc(tx(0),ty(0),4,0,Math.PI*2); ctx.fill();
+
+  // rhombus
+  ctx.lineWidth=3; ctx.strokeStyle="#111";
   ctx.beginPath();
-  ctx.moveTo(tx(0),ty(0));
-  ctx.lineTo(tx(p.Ax),ty(p.Ay));
-  ctx.lineTo(tx(p.x),ty(p.y));
-  ctx.stroke();
-
-  ctx.beginPath();
-  ctx.moveTo(tx(0),ty(0));
-  ctx.lineTo(tx(p.Bx),ty(p.By));
-  ctx.lineTo(tx(p.x),ty(p.y));
-  ctx.stroke();
-
-  // ペン
-  ctx.fillStyle=cur.z?"#1a5cff":"#777";
-  ctx.beginPath();
-  ctx.arc(tx(p.x),ty(p.y),5,0,Math.PI*2);
-  ctx.fill();
-}
-
-/* ===== カム描画 ===== */
-function drawCam(cv, fn){
-  const ctx=cv.getContext("2d");
-  ctx.clearRect(0,0,cv.width,cv.height);
-  if(samples.length===0) return;
-
-  const cx=cv.width/2, cy=cv.height/2;
-  ctx.strokeStyle="#000";
-  ctx.beginPath();
-  samples.forEach((s,i)=>{
-    const r=fn(s);
-    const th=2*Math.PI*i/samples.length;
-    const x=cx+r*Math.cos(th);
-    const y=cy+r*Math.sin(th);
-    if(i===0) ctx.moveTo(x,y); else ctx.lineTo(x,y);
-  });
-  ctx.closePath();
-  ctx.stroke();
-}
-
-/* ===== 再生 ===== */
-function togglePlay(){
-  playing=!playing;
-}
-function loop(){
-  if(playing){
-    t+=0.5;
-    drawAll();
+  ctx.moveTo(tx(pose.O.x),ty(pose.O.y));
+  ctx.lineTo(tx(pose.A.x),ty(pose.A.y));
+  if(pose.ok){
+    ctx.lineTo(tx(pose.P.x),ty(pose.P.y));
+    ctx.lineTo(tx(pose.B.x),ty(pose.B.y));
+    ctx.closePath(); ctx.stroke();
+  }else{
+    ctx.lineTo(tx(pose.B.x),ty(pose.B.y));
+    ctx.stroke();
   }
-  requestAnimationFrame(loop);
-}
-loop();
 
-/* ===== 起動時初期化（重要） ===== */
-window.addEventListener("load",()=>{
-  ta.value = sampleSquare();
-  recalc();
-  ta.addEventListener("input",recalc);
+  // points
+  ctx.fillStyle="#111";
+  ctx.beginPath(); ctx.arc(tx(pose.A.x),ty(pose.A.y),3.5,0,Math.PI*2); ctx.fill();
+  ctx.beginPath(); ctx.arc(tx(pose.B.x),ty(pose.B.y),3.5,0,Math.PI*2); ctx.fill();
+  if(pose.ok){
+    ctx.fillStyle = row.z ? "#1a5cff" : "#777";
+    ctx.beginPath(); ctx.arc(tx(pose.P.x),ty(pose.P.y),5,0,Math.PI*2); ctx.fill();
+  }
+
+  ctx.fillStyle="#333"; ctx.font="13px system-ui";
+  ctx.fillText(`i=${idx+1}/${state.rows.length}  α=${row.a.toFixed(2)}  β=${row.b.toFixed(2)}  z=${row.z}`, 14, 20);
+  if(!pose.ok){
+    ctx.fillStyle="#b00020";
+    ctx.fillText(`破綻: ${pose.reason}`, 14, 40);
+  }
+}
+
+function tick(){
+  if(state.playing && state.rows.length){
+    state.t += 0.5;
+    draw();
+  }
+  requestAnimationFrame(tick);
+}
+requestAnimationFrame(tick);
+
+function sampleABZ(){
+  const N=360;
+  const out=[];
+  for(let i=0;i<N;i++){
+    const th=i/N*2*Math.PI;
+    const a=45 + 20*Math.sin(th);
+    const b=135 - 20*Math.sin(th);
+    const z=(i%90<70)?1:0;
+    out.push(`${a.toFixed(2)},${b.toFixed(2)},${z}`);
+  }
+  return out.join("\n");
+}
+
+$('btnRecalc').addEventListener('click', compute);
+$('btnPlay').addEventListener('click', ()=>state.playing=true);
+$('btnStop').addEventListener('click', ()=>state.playing=false);
+$('btnSampleSq').addEventListener('click', ()=>{ $('ta').value=sampleABZ(); compute(); });
+
+window.addEventListener('load', ()=>{
+  $('ta').value = sampleABZ();
+  compute();
+  $('ta').addEventListener('input', compute);
 });
 </script>
 </body>
