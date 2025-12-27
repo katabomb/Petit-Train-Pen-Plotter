@@ -365,7 +365,6 @@ function drawAnim(){
   // origin at bottom-center, symmetric X, Y>=0
   const R = 2*l*1.15; // safety margin
   const xmin = -R, xmax = R;
-  // pan viewport upward so origin is lower third
   const ymin = -0.3*R, ymax = 1.9*R;
 
   const sx = W/(xmax-xmin);
@@ -373,7 +372,7 @@ function drawAnim(){
   const s = Math.min(sx,sy);
 
   const ox = (W - (xmax-xmin)*s)/2 - xmin*s;
-  const oy = H - (-0.3*R)*s;
+  const oy = H - ymin*s;
 
   function tx(x){ return x*s + ox; }
   function ty(y){ return oy - y*s; }
