@@ -35,6 +35,7 @@
     </select>
   </label>
   <label><input type="checkbox" id="travelOn" checked> ストローク間は z=0 で移動</label>
+  <button id="undoBtn">Undo</button>
   <button id="clearBtn">クリア</button>
 </div>
 <div class="hint">
@@ -64,7 +65,10 @@
   const y0Off=document.getElementById('y0Off');
   const nRows=document.getElementById('nRows');
 
-  let strokes=[];      // each stroke: [{x,y}...]
+  let strokes=[];
+
+  let undoStack=[];
+      // each stroke: [{x,y}...]
   let cur=null;
   let drawing=false;
 
@@ -132,6 +136,8 @@
   }
 
   canvas.addEventListener('pointerdown', (e)=>{
+    // save state for Undo
+    undoStack.push(JSON.parse(JSON.stringify(strokes)));
     drawing=true;
     canvas.setPointerCapture(e.pointerId);
     cur=[];
@@ -158,6 +164,12 @@
   canvas.addEventListener('pointerup', endStroke);
   canvas.addEventListener('pointercancel', endStroke);
   window.addEventListener('pointerup', endStroke);
+
+  document.getElementById('undoBtn').addEventListener('click', ()=>{
+    if(undoStack.length===0) return;
+    strokes = undoStack.pop();
+    redraw(); updateOut();
+  });
 
   document.getElementById('clearBtn').addEventListener('click', ()=>{
     strokes=[];
