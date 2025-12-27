@@ -349,6 +349,7 @@ function drawAnim(){
   const cv=$('cvAnim');
   const ctx=cv.getContext('2d');
   const W=cv.width,H=cv.height;
+
   ctx.clearRect(0,0,W,H);
   ctx.fillStyle="#fff"; ctx.fillRect(0,0,W,H);
 
@@ -360,62 +361,76 @@ function drawAnim(){
     return;
   }
 
-  // compute all pen positions for bounding box
+  // ---- Forward kinematics for all samples ----
   const pts=smp.map(s=>penXY(s.A,s.B,l));
+
+  // ---- Bounds: include origin and both elbow points too (so 4節リンク全体が必ず見える) ----
   let minx=Infinity,maxx=-Infinity,miny=Infinity,maxy=-Infinity;
   for(const p of pts){
-    minx=Math.min(minx, p.x, 0); maxx=Math.max(maxx, p.x, 0);
-    miny=Math.min(miny, p.y, 0); maxy=Math.max(maxy, p.y, 0);
+    const xs=[0, p.Ax, p.Bx, p.x];
+    const ys=[0, p.Ay, p.By, p.y];
+    for(const x of xs){ minx=Math.min(minx,x); maxx=Math.max(maxx,x); }
+    for(const y of ys){ miny=Math.min(miny,y); maxy=Math.max(maxy,y); }
   }
-  // add margin
-  const mx=(maxx-minx)*0.15+10, my=(maxy-miny)*0.15+10;
-  minx-=mx; maxx+=mx; miny-=my; maxy+=my;
-  const sx=W/(maxx-minx), sy=H/(maxy-miny);
-  const s=Math.min(sx,sy);
-  const ox=(W - (maxx-minx)*s)/2 - minx*s;
-  const oy=(H - (maxy-miny)*s)/2 - miny*s;
 
-  function tx(x){return x*s+ox;}
-  function ty(y){return H-(y*s+ (H-oy));} // invert y nicely
-  // Simpler: map with y up: y_px = H - (y*s + y0)
-  function ty2(y){return H - (y*s + (H-oy));}
+  // Safety margin (mm)
+  const pad = Math.max(12, 0.18*Math.max(maxx-minx, maxy-miny));
+  minx -= pad; maxx += pad;
+  miny -= pad; maxy += pad;
 
-  // draw trail (full) with z color
+  // IMPORTANT: if user wants the view a bit higher, keep a small upward pan here.
+  // (Positive panY shifts everything up on screen by effectively moving the window downward in world coords.)
+  const panY = 0.15 * (maxy-miny);  // tweakable; makes origin less "low"/cramped
+  miny -= panY;
+  maxy -= panY;
+
+  const sx = W / (maxx-minx);
+  const sy = H / (maxy-miny);
+  const s  = Math.min(sx, sy);
+
+  const ox = (W - (maxx-minx)*s)/2;
+  const oy = (H - (maxy-miny)*s)/2;
+
+  const tx = (x)=> ox + (x - minx)*s;
+  const ty = (y)=> H - (oy + (y - miny)*s); // y up in world
+
+  // ---- Trail ----
   ctx.lineWidth=2;
   for(let i=1;i<pts.length;i++){
     const p0=pts[i-1], p1=pts[i];
     const z = smp[i].Z;
     ctx.strokeStyle = z? "rgba(20,99,255,0.9)" : "rgba(140,140,140,0.7)";
     ctx.beginPath();
-    ctx.moveTo(tx(p0.x), H-(p0.y*s+ (H-oy)));
-    ctx.lineTo(tx(p1.x), H-(p1.y*s+ (H-oy)));
+    ctx.moveTo(tx(p0.x), ty(p0.y));
+    ctx.lineTo(tx(p1.x), ty(p1.y));
     ctx.stroke();
   }
 
-  // current index
+  // ---- Current pose ----
   const idx = Math.floor(state.t) % smp.length;
   const cur = pts[idx];
+
   // origin
   ctx.fillStyle="#111";
-  ctx.beginPath(); ctx.arc(tx(0), H-(0*s+(H-oy)), 4, 0, Math.PI*2); ctx.fill();
+  ctx.beginPath(); ctx.arc(tx(0), ty(0), 4, 0, Math.PI*2); ctx.fill();
 
-  // arms
+  // arms (two 2-link chains sharing pen)
   ctx.strokeStyle="#111"; ctx.lineWidth=3;
   ctx.beginPath();
-  ctx.moveTo(tx(0), H-(0*s+(H-oy)));
-  ctx.lineTo(tx(cur.Ax), H-(cur.Ay*s+(H-oy)));
-  ctx.lineTo(tx(cur.x),  H-(cur.y*s+(H-oy)));
+  ctx.moveTo(tx(0), ty(0));
+  ctx.lineTo(tx(cur.Ax), ty(cur.Ay));
+  ctx.lineTo(tx(cur.x),  ty(cur.y));
   ctx.stroke();
 
   ctx.beginPath();
-  ctx.moveTo(tx(0), H-(0*s+(H-oy)));
-  ctx.lineTo(tx(cur.Bx), H-(cur.By*s+(H-oy)));
-  ctx.lineTo(tx(cur.x),  H-(cur.y*s+(H-oy)));
+  ctx.moveTo(tx(0), ty(0));
+  ctx.lineTo(tx(cur.Bx), ty(cur.By));
+  ctx.lineTo(tx(cur.x),  ty(cur.y));
   ctx.stroke();
 
   // pen point
   ctx.fillStyle = smp[idx].Z? "#1463ff" : "#888";
-  ctx.beginPath(); ctx.arc(tx(cur.x), H-(cur.y*s+(H-oy)), 5, 0, Math.PI*2); ctx.fill();
+  ctx.beginPath(); ctx.arc(tx(cur.x), ty(cur.y), 5, 0, Math.PI*2); ctx.fill();
 
   // text
   ctx.fillStyle="#333"; ctx.font="12px system-ui";
