@@ -1,0 +1,311 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>線文メーカー v0.3.1（距離＋角度の間引き）</title>
+<style>
+:root{--bg:#fff;--ink:#000;--line:#ddd;--btn:#f4f4f4;--accent:#0b66ff;--preview:#888}
+*{box-sizing:border-box}
+body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto;background:#fff;color:#000}
+header{position:sticky;top:0;background:#fff;border-bottom:1px solid var(--line);padding:10px}
+.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+button,select,input{border:1px solid var(--line);background:var(--btn);border-radius:8px;padding:6px 10px}
+button.primary{background:var(--accent);color:#fff;border-color:var(--accent)}
+main{padding:10px}
+.canvasWrap{border:1px solid var(--line);border-radius:10px;max-width:520px;margin:0 auto}
+canvas{display:block;width:100%;aspect-ratio:1/1;background:#fff;touch-action:none}
+textarea{width:100%;min-height:160px;margin-top:10px;border:1px solid var(--line);border-radius:8px;padding:8px;font-family:monospace}
+.small{font-size:12px;color:#555}
+</style>
+</head>
+<body>
+
+<header>
+<div class="row">
+<select id="frameSel">
+<option value="65">枠 65mm</option>
+<option value="70" selected>枠 70mm</option>
+<option value="72">枠 72mm</option>
+<option value="75">枠 75mm</option>
+</select>
+<label><input type="checkbox" id="simplifyOn" checked> 間引きON</label>
+
+<div class="row" style="gap:10px;flex-wrap:wrap">
+  <label>アーム長 l (mm)
+    <input type="number" id="lArm" value="90" step="1" style="width:90px">
+  </label>
+  <label>オフセット x0 (mm)
+    <input type="number" id="x0Off" value="0" step="1" style="width:90px">
+  </label>
+  <label>オフセット y0 (mm)
+    <input type="number" id="y0Off" value="130" step="1" style="width:90px">
+  </label>
+  <label>出力形式
+    <select id="outMode" style="width:180px">
+      <option value="abz" selected>α,β,z（360行）</option>
+      <option value="xy">x,y（従来）</option>
+    </select>
+  </label>
+  <label>行数
+    <select id="nRows" style="width:120px">
+      <option value="360" selected>360</option>
+      <option value="720">720</option>
+    </select>
+  </label>
+</div>
+<div class="row" style="gap:10px;flex-wrap:wrap;margin-top:6px">
+  <label><input type="checkbox" id="insertTravel" checked> ストローク間の移動（z=0）を自動追加</label>
+  <label><input type="checkbox" id="continuousAngles" checked> 角度を連続化（±360°補正）</label>
+</div>
+
+<label>強さ <input type="range" id="angleThr" min="2" max="20" value="6"></label>
+<button id="undo">↩︎</button>
+<button id="clear">🧽</button>
+<button class="primary" id="export">線文生成</button>
+</div>
+<div class="small">距離(0.4mm)+角度 間引き／灰色＝間引き後プレビュー</div>
+</header>
+
+<main>
+<div class="canvasWrap">
+<canvas id="c"></canvas>
+</div>
+<textarea id="out"></textarea>
+</main>
+
+<script>
+const c=document.getElementById("c");
+const ctx=c.getContext("2d");
+const frameSel=document.getElementById("frameSel");
+const simplifyOn=document.getElementById("simplifyOn");
+const angleThr=document.getElementById("angleThr");
+const out=document.getElementById("out");
+
+let strokes=[], cur=null, drawing=false;
+
+function resize(){
+ const size=c.parentElement.clientWidth;
+ c.width=c.height=size;
+ redraw();
+}
+window.addEventListener("resize",resize);
+
+function redraw(){
+ ctx.clearRect(0,0,c.width,c.height);
+ ctx.strokeStyle="#bbb"; ctx.strokeRect(0,0,c.width,c.height);
+
+ ctx.strokeStyle="#000"; ctx.lineWidth=2;
+ for(const s of strokes) drawStroke(s);
+
+ if(simplifyOn.checked){
+   ctx.strokeStyle="#888";
+   for(const s of strokes){
+     const simp=simplifyStroke(s);
+     drawStroke(simp);
+   }
+ }
+
+ if(cur){ ctx.strokeStyle="#000"; drawStroke(cur); }
+}
+
+function drawStroke(s){
+ if(s.length<2) return;
+ ctx.beginPath();
+ ctx.moveTo(s[0].x,s[0].y);
+ for(let i=1;i<s.length;i++) ctx.lineTo(s[i].x,s[i].y);
+ ctx.stroke();
+}
+
+function pos(e){ return {x:e.offsetX,y:e.offsetY}; }
+
+c.addEventListener("pointerdown",e=>{
+ drawing=true; cur=[pos(e)]; redraw();
+});
+c.addEventListener("pointermove",e=>{
+ if(!drawing) return;
+ const p=pos(e), l=cur[cur.length-1];
+ if(Math.hypot(p.x-l.x,p.y-l.y)>1){ cur.push(p); redraw(); }
+});
+c.addEventListener("pointerup",()=>{
+ if(cur&&cur.length>1) strokes.push(cur);
+ cur=null; drawing=false; redraw();
+});
+
+document.getElementById("undo").onclick=()=>{strokes.pop(); redraw();};
+document.getElementById("clear").onclick=()=>{strokes=[];cur=null;out.value=""; redraw();};
+
+function simplifyStroke(s){
+ if(s.length<3) return s.slice();
+ const mm=+frameSel.value;
+ const scale=c.width/mm;
+
+// ===== v0.4.0: export α,β,z (360 rows) =====
+function deg(rad){ return rad*180/Math.PI; }
+function rad(deg){ return deg*Math.PI/180; }
+
+function wrapNear(prevDeg, vDeg){
+  if(!Number.isFinite(prevDeg)) return vDeg;
+  let w=vDeg;
+  while(w-prevDeg>180) w-=360;
+  while(w-prevDeg<-180) w+=360;
+  return w;
+}
+
+function ikAlphaBeta(x, y, l, prevA, prevB, continuous=true){
+  // x,y in mm in world coordinates (origin at tail root)
+  const rho=Math.hypot(x,y);
+  const phi=Math.atan2(y,x);
+  const rhoC=Math.min(Math.max(rho, 1e-9), 2*l-1e-6);
+  const gamma=Math.acos(rhoC/(2*l));
+  let a1=phi+gamma, b1=phi-gamma;
+  let a2=phi-gamma, b2=phi+gamma;
+
+  // choose continuous solution closer to previous
+  let A1=deg(a1), B1=deg(b1), A2=deg(a2), B2=deg(b2);
+  if(continuous){
+    A1=wrapNear(prevA, A1); B1=wrapNear(prevB, B1);
+    A2=wrapNear(prevA, A2); B2=wrapNear(prevB, B2);
+    const d1=Math.abs(A1-prevA)+Math.abs(B1-prevB);
+    const d2=Math.abs(A2-prevA)+Math.abs(B2-prevB);
+    if(Number.isFinite(prevA) && d2<d1){ return {A:A2,B:B2}; }
+  }
+  return {A:A1,B:B1};
+}
+
+function buildPolylineWithZ(strokesMm, addTravel){
+  // strokesMm: array of stroke arrays [{x,y}] in mm coords
+  // returns points [{x,y,z}] z=1 for stroke, z=0 for travel segments
+  const pts=[];
+  const addLine=(p0,p1,z,steps=12)=>{
+    for(let i=0;i<=steps;i++){
+      const t=i/steps;
+      pts.push({x:p0.x+(p1.x-p0.x)*t, y:p0.y+(p1.y-p0.y)*t, z});
+    }
+  };
+  for(let si=0; si<strokesMm.length; si++){
+    const s=strokesMm[si];
+    if(!s || s.length<1) continue;
+    // travel from prev end to this start
+    if(addTravel && pts.length){
+      const prev=pts[pts.length-1];
+      const start={x:s[0].x, y:s[0].y};
+      addLine({x:prev.x,y:prev.y},{x:start.x,y:start.y},0,10);
+    }
+    // stroke points z=1
+    for(let i=0;i<s.length;i++){
+      pts.push({x:s[i].x, y:s[i].y, z:1});
+    }
+  }
+  return pts;
+}
+
+function resamplePolyline(pts, n){
+  // arclength resample with z by segment majority
+  if(pts.length<2){
+    return Array.from({length:n},()=>({x:0,y:0,z:0}));
+  }
+  const segLen=[];
+  let total=0;
+  for(let i=1;i<pts.length;i++){
+    const d=Math.hypot(pts[i].x-pts[i-1].x, pts[i].y-pts[i-1].y);
+    segLen.push(Math.max(1e-6,d));
+    total+=Math.max(1e-6,d);
+  }
+  const out=[];
+  let target=0;
+  let acc=0;
+  let si=0;
+  for(let k=0;k<n;k++){
+    target = (k/(n))*total; // [0,total)
+    while(si<segLen.length-1 && acc+segLen[si] < target):
+      acc += segLen[si]
+      si += 1
+    if(si>=segLen.length) si=segLen.length-1;
+    const t = (target-acc)/segLen[si];
+    const p0=pts[si], p1=pts[si+1];
+    const x=p0.x+(p1.x-p0.x)*t;
+    const y=p0.y+(p1.y-p0.y)*t;
+    // z: choose p0.z (stable enough); could also threshold t
+    const z = (p0.z===1 && p1.z===1) ? 1 : (p0.z===0 && p1.z===0 ? 0 : (t<0.5?p0.z:p1.z));
+    out.push({x,y,z});
+  }
+  return out;
+}
+
+function updateOut(){
+  const mm=+frameSel.value;
+  const mode=outMode.value;
+  const N=+nRows.value;
+  const l=+lArm.value;
+  const x0=+x0Off.value;
+  const y0=+y0Off.value;
+  const addTravel=insertTravel.checked;
+  const cont=continuousAngles.checked;
+
+  if(mode==="xy"){
+    let lines=[];
+    for(const s0 of strokes){
+      const s=simplifyOn.checked ? simplifyStroke(s0) : s0;
+      let prev=null;
+      for(const p of s){
+        let x=p.x/scale, y=(c.height-p.y)/scale;
+        if(prev && Math.hypot(x-prev[0],y-prev[1])<0.4) continue;
+        prev=[x,y];
+        lines.push(`${x.toFixed(2)},${y.toFixed(2)}`);
+      }
+      lines.push("");
+    }
+    while(lines.length && lines[lines.length-1]==="") lines.pop();
+    out.value=lines.join("\n");
+    return;
+  }
+
+  // mode abz
+  // 1) convert strokes to mm points (&& simplify)
+  const strokesMm=[];
+  for(const s0 of strokes){
+    const s=simplifyOn.checked ? simplifyStroke(s0) : s0;
+    if(!s || s.length<2) continue;
+    const sm=[];
+    for(const p of s){
+      sm.push({x:p.x/scale, y:(c.height-p.y)/scale});
+    }
+    strokesMm.push(sm);
+  }
+  // 2) build polyline with z states
+  const poly=buildPolylineWithZ(strokesMm, addTravel);
+  // 3) resample to N rows
+  const samp=resamplePolyline(poly, N);
+
+  // 4) IK -> α,β (degrees), z
+  let prevA=NaN, prevB=NaN;
+  const lines=[];
+  for(let i=0;i<N;i++){
+    const p=samp[i];
+    const X=x0+p.x, Y=y0+p.y;
+    const ab=ikAlphaBeta(X,Y,l,prevA,prevB,cont);
+    let A=ab.A, B=ab.B;
+    prevA=A; prevB=B;
+    // normalize to 0..360 for readability (optional)
+    const norm=(v)=>{ let w=v%360; if(w<0) w+=360; return w; };
+    A=norm(A); B=norm(B);
+    lines.push(`${A.toFixed(2)},${B.toFixed(2)},${p.z?1:0}`);
+  }
+  out.value=lines.join("\n");
+}
+
+
+
+
+// listeners for new controls
+for(const id of ["lArm","x0Off","y0Off","outMode","nRows","insertTravel","continuousAngles"]){
+  const el=document.getElementById(id);
+  if(el) el.addEventListener("input", updateOut);
+}
+updateOut();
+resize();
+
+</script>
+</body>
+</html>
