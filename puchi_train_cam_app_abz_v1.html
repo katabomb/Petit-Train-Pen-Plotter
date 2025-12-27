@@ -1,303 +1,485 @@
 <!DOCTYPE html>
 <html lang="ja">
 <head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>お絵描き → αβz 出力（下絵・グリッド対応 v0.4.3）</title>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>プチ電車ペンプロッタ2｜αβZデータ→3カム生成</title>
 <style>
-  body{font-family:system-ui,-apple-system,BlinkMacSystemFont,Segoe UI,Roboto;margin:0;background:#fff;color:#111}
-  .toolbar{display:flex;flex-wrap:wrap;gap:10px;padding:8px;border-bottom:1px solid #ccc;align-items:center}
-  #wrap{display:flex;gap:12px;padding:8px;align-items:flex-start}
-  #canvasWrap{position:relative;width:360px;height:360px}
-  #canvasWrap canvas{position:absolute;left:0;top:0}
-  #bg{z-index:0}
-  #grid{z-index:1;pointer-events:none}
-  #draw{z-index:2;border:1px solid #999;touch-action:none}
-  #right{flex:1 1 auto;min-width:260px}
-  textarea{width:100%;height:300px;font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace}
-  label{font-size:12px;white-space:nowrap}
-  .hint{font-size:12px;color:#444;padding:0 8px 8px}
+  :root{--bg:#fff;--fg:#111;--muted:#555;--line:#ddd;--blue:#1463ff;--gray:#888;}
+  body{margin:0;font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto;color:var(--fg);background:var(--bg);}
+  header{padding:10px 12px;border-bottom:1px solid var(--line);display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+  header h1{font-size:14px;margin:0 12px 0 0}
+  .wrap{display:grid;grid-template-columns: 360px 1fr;gap:12px;padding:12px;align-items:start}
+  .card{border:1px solid var(--line);border-radius:10px;padding:10px;background:#fff}
+  .card h2{font-size:13px;margin:0 0 8px 0}
+  .row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+  label{font-size:12px;color:var(--muted);display:flex;gap:6px;align-items:center}
+  input,select,button,textarea{font:inherit}
+  input[type="number"]{width:86px}
+  textarea{width:100%;height:220px;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12px}
+  button{border:1px solid var(--line);background:#f7f7f7;border-radius:8px;padding:8px 10px;cursor:pointer}
+  button:hover{background:#f0f0f0}
+  .hint{font-size:12px;color:var(--muted);line-height:1.4}
+  .grid2{display:grid;grid-template-columns: 1fr 1fr;gap:12px}
+  canvas{display:block;max-width:100%;height:auto;background:#fff}
+  .small{font-size:12px;color:var(--muted)}
 </style>
 </head>
 <body>
+<header>
+  <h1>αβZデータ → 3カム生成（α / β / Z）</h1>
+  <button id="btnSampleSquare">サンプル（正方形）</button>
+  <button id="btnSampleStar">サンプル（星）</button>
+  <button id="btnRecalc">再計算</button>
+  <button id="btnPlay">再生</button>
+  <button id="btnPause">停止</button>
+</header>
 
-<div class="toolbar">
-  <label>下絵 <input type="file" id="bgFile" accept="image/*"></label>
-  <label>透過 <input type="range" id="bgAlpha" min="0" max="1" step="0.05" value="0.30"></label>
-  <label><input type="checkbox" id="gridOn" checked> グリッド</label>
-  <label>l <input type="number" id="lArm" value="90" step="1" style="width:70px"> mm</label>
-  <label>x0 <input type="number" id="x0Off" value="0" step="1" style="width:70px"> mm</label>
-  <label>y0 <input type="number" id="y0Off" value="130" step="1" style="width:70px"> mm</label>
-  <label>行数
-    <select id="nRows">
-      <option value="360" selected>360</option>
-      <option value="720">720</option>
-    </select>
-  </label>
-  <label><input type="checkbox" id="travelOn" checked> ストローク間は z=0 で移動</label>
-  <button id="undoBtn">Undo</button>
-  <button id="clearBtn">クリア</button>
-</div>
-<div class="hint">
-  ペンを離すと「別ストローク」になります。ストローク間の移動は自動で z=0（ペン上げ）にできます。
-</div>
-
-<div id="wrap">
-  <div id="canvasWrap">
-    <canvas id="bg" width="360" height="360"></canvas>
-    <canvas id="grid" width="360" height="360"></canvas>
-    <canvas id="draw" width="360" height="360"></canvas>
+<div class="wrap">
+  <div class="card">
+    <h2>入力（α,β,z）</h2>
+    <div class="hint">1行＝ <b>α,β,z</b>（度,度,0/1）。行数は自由（360推奨）。<br>このアプリ内部で「Z切替時にαβ停止」を自動挿入し、360点に正規化します。</div>
+    <textarea id="ta"></textarea>
+    <div class="row" style="margin-top:8px">
+      <label>アーム長 l(mm) <input type="number" id="lArm" value="90" step="1"></label>
+      <label>外周半径 Router(mm) <input type="number" id="rOuter" value="70" step="1"></label>
+      <label>中心穴(半径mm) <input type="number" id="rHole" value="2.5" step="0.1"></label>
+    </div>
+    <div class="row" style="margin-top:6px">
+      <label>α cam r(min,max) <input type="number" id="aMin" value="32" step="1"> <input type="number" id="aMax" value="60" step="1"></label>
+      <label>β cam r(min,max) <input type="number" id="bMin" value="32" step="1"> <input type="number" id="bMax" value="60" step="1"></label>
+      <label>Z cam r(min,max) <input type="number" id="zMin" value="50" step="1"> <input type="number" id="zMax" value="60" step="1"></label>
+    </div>
+    <div class="row" style="margin-top:6px">
+      <label>Z 上下速度比（上:下）
+        <select id="zRatio">
+          <option value="7:3" selected>7:3</option>
+          <option value="6:4">6:4</option>
+          <option value="5:5">5:5</option>
+        </select>
+      </label>
+      <label>Z切替に割り当てる最小角(°) <input type="number" id="zMinDeg" value="8" step="1"></label>
+      <label>待機余白(%) <input type="number" id="idlePct" value="10" step="1"></label>
+    </div>
+    <div class="row" style="margin-top:8px">
+      <button id="btnPngA">PNG保存 αカム</button>
+      <button id="btnPngB">PNG保存 βカム</button>
+      <button id="btnPngZ">PNG保存 Zカム</button>
+      <button id="btnPngAll">PNG保存 3枚</button>
+    </div>
+    <div class="small" style="margin-top:6px">※ “向きマーク”は 0°方向（右向き）に短い線を入れています。</div>
   </div>
-  <div id="right">
-    <textarea id="out" spellcheck="false"></textarea>
+
+  <div class="grid2">
+    <div class="card">
+      <h2>リンク機構アニメ（ペン軌跡）</h2>
+      <canvas id="cvAnim" width="520" height="520"></canvas>
+      <div class="hint">青=描画(z=1)、灰=移動(z=0)。</div>
+    </div>
+    <div class="card">
+      <h2>カム形状（3枚プレビュー）</h2>
+      <div class="grid2">
+        <div><canvas id="cvA" width="360" height="360"></canvas><div class="small" style="text-align:center">α</div></div>
+        <div><canvas id="cvB" width="360" height="360"></canvas><div class="small" style="text-align:center">β</div></div>
+        <div style="grid-column:1 / span 2"><canvas id="cvZ" width="740" height="360"></canvas><div class="small" style="text-align:center">Z</div></div>
+      </div>
+    </div>
   </div>
 </div>
 
 <script>
-  const bg=document.getElementById('bg'), grid=document.getElementById('grid'), canvas=document.getElementById('draw');
-  const bctx=bg.getContext('2d'), gctx=grid.getContext('2d'), ctx=canvas.getContext('2d');
-  const out=document.getElementById('out');
+// ---------- utilities ----------
+const TA = document.getElementById('ta');
+const $ = (id)=>document.getElementById(id);
+function clamp(x,a,b){return Math.max(a,Math.min(b,x));}
+function lerp(a,b,t){return a+(b-a)*t;}
+function norm360(d){ let w=d%360; if(w<0) w+=360; return w; }
+function unwrap(prev, cur){
+  // cur is in [0,360) or any; return value near prev
+  if(!Number.isFinite(prev)) return cur;
+  let w=cur;
+  while(w-prev>180) w-=360;
+  while(w-prev<-180) w+=360;
+  return w;
+}
+function parseRatio(s){
+  const m=s.split(':');
+  const a=parseFloat(m[0]||'1'), b=parseFloat(m[1]||'1');
+  const sum=a+b;
+  return {up:a/sum, down:b/sum};
+}
 
-  const travelOn=document.getElementById('travelOn');
-  const gridOn=document.getElementById('gridOn');
-  const lArm=document.getElementById('lArm');
-  const x0Off=document.getElementById('x0Off');
-  const y0Off=document.getElementById('y0Off');
-  const nRows=document.getElementById('nRows');
+// ---------- samples ----------
+function sampleSquare(){
+  // simple square-ish loop in αβz (draw then idle)
+  const N=360;
+  let lines=[];
+  for(let i=0;i<N;i++){
+    // create square in XY then IK analytically? We'll just approximate with known "perfect" profile:
+    // α swings ~66°, β swings ~66° out of phase to draw square-ish.
+    const t=i/N;
+    const phase = t*4;
+    const s = phase%1;
+    const edge = Math.floor(phase);
+    // XY square centered around (0, sqrt2*l) feel by using angles near 45/135 and modulating
+    const baseA=45, baseB=135;
+    let da=0, db=0;
+    const amp=33; // total swing ~66
+    if(edge===0){ da=lerp(-amp, amp, s); db=lerp( amp, amp, s); }
+    if(edge===1){ da=lerp( amp, amp, s); db=lerp( amp,-amp, s); }
+    if(edge===2){ da=lerp( amp,-amp, s); db=lerp(-amp,-amp, s); }
+    if(edge===3){ da=lerp(-amp,-amp, s); db=lerp(-amp, amp, s); }
+    const z = (i<320)?1:0; // idle tail
+    lines.push(`${norm360(baseA+da).toFixed(2)},${norm360(baseB+db).toFixed(2)},${z}`);
+  }
+  return lines.join("\n");
+}
+function sampleStar(){
+  const N=360;
+  let lines=[];
+  const baseA=45, baseB=135;
+  for(let i=0;i<N;i++){
+    const t=i/N;
+    const w=Math.sin(2*Math.PI*5*t); // 5 points
+    const u=Math.cos(2*Math.PI*3*t);
+    const amp=28;
+    const a=norm360(baseA + amp*w);
+    const b=norm360(baseB + amp*u);
+    const z = (i<330)?1:0;
+    lines.push(`${a.toFixed(2)},${b.toFixed(2)},${z}`);
+  }
+  return lines.join("\n");
+}
 
-  let strokes=[];
+// ---------- core: normalize αβz to 360 with Z-stop insertion ----------
+function parseABZ(text){
+  const rows=[];
+  const lines=text.split(/\r?\n/);
+  for(const ln of lines){
+    const s=ln.trim();
+    if(!s) continue;
+    const parts=s.split(/[\s,]+/).filter(Boolean);
+    if(parts.length<3) continue;
+    const A=parseFloat(parts[0]), B=parseFloat(parts[1]), Z=parseInt(parts[2],10);
+    if(!Number.isFinite(A)||!Number.isFinite(B)) continue;
+    rows.push({A:norm360(A), B:norm360(B), Z:(Z?1:0)});
+  }
+  return rows;
+}
 
-  let undoStack=[];
-      // each stroke: [{x,y}...]
-  let cur=null;
-  let drawing=false;
+function expandWithZStops(rows){
+  // Two-stage: XY move first (Z stays prev), then if Z changes, insert Z event holding A,B.
+  if(rows.length<2) return rows.slice();
+  const out=[];
+  let prev = rows[0];
+  out.push({A:prev.A,B:prev.B,Z:prev.Z, kind:"xy"});
+  for(let i=1;i<rows.length;i++){
+    const cur=rows[i];
+    // XY event (Z stays prev.Z)
+    out.push({A:cur.A,B:cur.B,Z:prev.Z, kind:"xy"});
+    // Z event if changed
+    if(cur.Z!==prev.Z){
+      out.push({A:cur.A,B:cur.B,Z:cur.Z, kind:"z"});
+    }
+    prev=cur;
+  }
+  // loop closure: ensure smooth by considering last->first Z change? We'll ignore; user can add if needed.
+  return out;
+}
 
-  function redraw(){
-    ctx.clearRect(0,0,canvas.width,canvas.height);
-    ctx.lineWidth=2;
-    ctx.strokeStyle="#0066ff";
-    ctx.lineJoin="round";
-    ctx.lineCap="round";
-    for(const s of strokes){
-      if(!s || s.length<2) continue;
-      ctx.beginPath();
-      for(let i=0;i<s.length;i++){
-        const p=s[i];
-        if(i===0) ctx.moveTo(p.x,p.y);
-        else ctx.lineTo(p.x,p.y);
-      }
-      ctx.stroke();
+function buildWeightedSamples(events, N, zMinDeg, zRatioUpDown, idlePct){
+  // Allocate N samples over events proportionally to "difficulty". Keep idlePct at end as Z=0 and XY hold.
+  const idleN = Math.max(0, Math.round(N * (clamp(idlePct,0,50)/100)));
+  const mainN = Math.max(10, N - idleN);
+
+  // compute weights per event segment (between consecutive events)
+  const segs=[];
+  let prevA=NaN, prevB=NaN, prevZ=events[0]?.Z ?? 0;
+  for(let i=0;i<events.length;i++){
+    const e=events[i];
+    const A=unwrap(prevA, e.A);
+    const B=unwrap(prevB, e.B);
+    const dA = Number.isFinite(prevA)? Math.abs(A-prevA):0;
+    const dB = Number.isFinite(prevB)? Math.abs(B-prevB):0;
+    let w = 0.1 + (dA+dB)*0.02; // base + scaled degrees
+    if(e.kind==="z"){
+      // ensure minimum effort for Z transitions; up slower than down
+      const up = (prevZ===0 && e.Z===1);
+      const ratio = up ? zRatioUpDown.up : zRatioUpDown.down;
+      w += (zMinDeg/5) * (ratio/0.5);
+    }
+    segs.push({A, B, Z:e.Z, kind:e.kind, w});
+    prevA=A; prevB=B; prevZ=e.Z;
+  }
+
+  // normalize weights to mainN points
+  const totalW = segs.reduce((s,x)=>s+x.w,0) || 1;
+  // cumulative distribution for sampling
+  const cum=[];
+  let acc=0;
+  for(const s of segs){ acc += s.w; cum.push(acc/totalW); }
+
+  const samples=[];
+  let idx=0;
+  for(let k=0;k<mainN;k++){
+    const u = (k/(mainN-1));
+    while(idx<cum.length-1 && cum[idx] < u) idx++;
+    const s = segs[idx];
+    samples.push({A:norm360(s.A), B:norm360(s.B), Z:s.Z});
+  }
+
+  // Idle tail: hold last A,B; force Z=0 (paper down away) for safety
+  if(idleN>0){
+    const last = samples[samples.length-1] || {A:0,B:0,Z:0};
+    for(let i=0;i<idleN;i++){
+      samples.push({A:last.A,B:last.B,Z:0});
     }
   }
+  // trim/pad
+  while(samples.length>N) samples.pop();
+  while(samples.length<N){
+    const last=samples[samples.length-1]||{A:0,B:0,Z:0};
+    samples.push({...last});
+  }
+  return samples;
+}
 
-  function drawGrid(){
-    gctx.clearRect(0,0,grid.width,grid.height);
-    if(!gridOn.checked) return;
-    gctx.strokeStyle="#ddd";
-    for(let i=0;i<=360;i+=30){
-      gctx.beginPath(); gctx.moveTo(i,0); gctx.lineTo(i,360); gctx.stroke();
-      gctx.beginPath(); gctx.moveTo(0,i); gctx.lineTo(360,i); gctx.stroke();
+// ---------- forward kinematics ----------
+function penXY(Adeg, Bdeg, l){
+  const a = Adeg*Math.PI/180;
+  const b = Bdeg*Math.PI/180;
+  const Ax = l*Math.cos(a), Ay = l*Math.sin(a);
+  const Bx = l*Math.cos(b), By = l*Math.sin(b);
+  return {x:Ax+Bx, y:Ay+By, Ax, Ay, Bx, By};
+}
+
+// ---------- cam mapping ----------
+function mapToRadius(valuesUnwrapped, rMin, rMax){
+  let mn=Infinity, mx=-Infinity;
+  for(const v of valuesUnwrapped){ mn=Math.min(mn,v); mx=Math.max(mx,v); }
+  if(!Number.isFinite(mn) || !Number.isFinite(mx) || mx-mn<1e-9){
+    return valuesUnwrapped.map(_=> (rMin+rMax)/2);
+  }
+  return valuesUnwrapped.map(v=> rMin + ( (v-mn)/(mx-mn) )*(rMax-rMin) );
+}
+
+function camFromAngles(samples, key, rMin, rMax){
+  // unwrap for smooth cam then map to radii
+  const un=[];
+  let prev=NaN;
+  for(const s of samples){
+    const v = s[key];
+    const u = unwrap(prev, v);
+    un.push(u);
+    prev=u;
+  }
+  return mapToRadius(un, rMin, rMax);
+}
+
+function camFromZ(samples, rMin, rMax){
+  // z is 0/1; we still smooth by simple moving average window
+  const z = samples.map(s=>s.Z?1:0);
+  const win=5;
+  const zs=z.map((_,i)=>{
+    let acc=0,c=0;
+    for(let j=-win;j<=win;j++){
+      const k=clamp(i+j,0,z.length-1);
+      acc+=z[k]; c++;
     }
-  }
-  gridOn.addEventListener('change', ()=>{ drawGrid(); });
-  drawGrid();
-
-  // ----- Underlay image -----
-  const bgFile=document.getElementById('bgFile');
-  const bgAlpha=document.getElementById('bgAlpha');
-  let bgImg=null;
-
-  function renderBG(){
-    bctx.clearRect(0,0,bg.width,bg.height);
-    if(!bgImg) return;
-    bctx.save();
-    bctx.globalAlpha = parseFloat(bgAlpha.value);
-    const iw=bgImg.naturalWidth, ih=bgImg.naturalHeight;
-    const s=Math.min(bg.width/iw, bg.height/ih);
-    const dw=iw*s, dh=ih*s;
-    const dx=(bg.width-dw)/2, dy=(bg.height-dh)/2;
-    bctx.drawImage(bgImg, dx, dy, dw, dh);
-    bctx.restore();
-  }
-
-  bgFile.addEventListener('change', (e)=>{
-    const f=e.target.files && e.target.files[0];
-    if(!f) return;
-    const img=new Image();
-    img.onload=()=>{ bgImg=img; renderBG(); };
-    img.src=URL.createObjectURL(f);
+    return acc/c;
   });
-  bgAlpha.addEventListener('input', renderBG);
+  return zs.map(v=> rMin + v*(rMax-rMin));
+}
 
-  // ----- Input (pointer) -----
-  function getPos(e){
-    const r=canvas.getBoundingClientRect();
-    return {x:(e.clientX-r.left), y:(e.clientY-r.top)};
+// ---------- drawing cams ----------
+function drawCam(canvas, radii, router, rhole, label){
+  const ctx=canvas.getContext('2d');
+  const W=canvas.width,H=canvas.height;
+  ctx.clearRect(0,0,W,H);
+  const cx=W/2, cy=H/2;
+  const scale = Math.min(W,H) / (2*(router+8)); // padding
+  function mmToPx(mm){ return mm*scale; }
+
+  // background
+  ctx.fillStyle="#fff"; ctx.fillRect(0,0,W,H);
+
+  // outer circle
+  ctx.strokeStyle="#bbb"; ctx.lineWidth=1;
+  ctx.beginPath(); ctx.arc(cx,cy, mmToPx(router), 0, Math.PI*2); ctx.stroke();
+
+  // direction mark at 0° (right)
+  ctx.strokeStyle="#999";
+  ctx.beginPath();
+  ctx.moveTo(cx, cy);
+  ctx.lineTo(cx+mmToPx(router), cy);
+  ctx.stroke();
+
+  // cam outline
+  ctx.strokeStyle="#111"; ctx.lineWidth=2;
+  ctx.beginPath();
+  for(let i=0;i<radii.length;i++){
+    const th = (i/radii.length)*Math.PI*2;
+    const r = radii[i];
+    const x = cx + mmToPx(r)*Math.cos(th);
+    const y = cy + mmToPx(r)*Math.sin(th);
+    if(i===0) ctx.moveTo(x,y); else ctx.lineTo(x,y);
+  }
+  ctx.closePath(); ctx.stroke();
+
+  // center hole
+  ctx.strokeStyle="#111"; ctx.lineWidth=2;
+  ctx.beginPath(); ctx.arc(cx,cy, mmToPx(rhole), 0, Math.PI*2); ctx.stroke();
+
+  // label
+  ctx.fillStyle="#222";
+  ctx.font="bold 18px system-ui";
+  ctx.fillText(label, 10, 24);
+}
+
+function downloadPNG(canvas, filename){
+  const a=document.createElement('a');
+  a.download=filename;
+  a.href=canvas.toDataURL('image/png');
+  a.click();
+}
+
+// ---------- animation ----------
+let state = {samples:[], l:90, t:0, playing:false, raf:0};
+
+function drawAnim(){
+  const cv=$('cvAnim');
+  const ctx=cv.getContext('2d');
+  const W=cv.width,H=cv.height;
+  ctx.clearRect(0,0,W,H);
+  ctx.fillStyle="#fff"; ctx.fillRect(0,0,W,H);
+
+  const l=parseFloat($('lArm').value);
+  const smp=state.samples;
+  if(!smp.length){
+    ctx.fillStyle="#444"; ctx.font="14px system-ui";
+    ctx.fillText("データがありません（再計算）", 20, 30);
+    return;
   }
 
-  canvas.addEventListener('pointerdown', (e)=>{
-    // save state for Undo
-    undoStack.push(JSON.parse(JSON.stringify(strokes)));
-    drawing=true;
-    canvas.setPointerCapture(e.pointerId);
-    cur=[];
-    strokes.push(cur);
-    cur.push(getPos(e));
-    redraw(); updateOut();
-  });
+  // === FINAL FIXED VIEWPORT ===
+  // origin = bottom-center
+  // X : [-2l, +2l], Y : [0, 2l]
+  const R = 2*l*1.1;
+  const xmin = -R, xmax = R;
+  const ymin = 0, ymax = R;
 
-  canvas.addEventListener('pointermove', (e)=>{
-    if(!drawing || !cur) return;
-    const p=getPos(e);
-    const last=cur[cur.length-1];
-    if(last && Math.hypot(p.x-last.x, p.y-last.y) < 0.5) return;
-    cur.push(p);
-    redraw(); updateOut();
-  });
+  const sx = W/(xmax-xmin);
+  const sy = H/(ymax-ymin);
+  const s = Math.min(sx,sy);
 
-  function endStroke(){
-    if(!drawing) return;
-    drawing=false;
-    cur=null;
-    updateOut();
-  }
-  canvas.addEventListener('pointerup', endStroke);
-  canvas.addEventListener('pointercancel', endStroke);
-  window.addEventListener('pointerup', endStroke);
+  const ox = (W - (xmax-xmin)*s)/2 - xmin*s;
+  const oy = H - ymin*s;
 
-  document.getElementById('undoBtn').addEventListener('click', ()=>{
-    if(undoStack.length===0) return;
-    strokes = undoStack.pop();
-    redraw(); updateOut();
-  });
+  const tx = x => x*s + ox;
+  const ty = y => oy - y*s;
 
-  document.getElementById('clearBtn').addEventListener('click', ()=>{
-    strokes=[];
-    redraw(); updateOut();
-  });
+  const pts=smp.map(s=>penXY(s.A,s.B,l));
 
-  // ----- Geometry / IK -----
-  function deg(rad){ return rad*180/Math.PI; }
-  function wrapNear(prevDeg, vDeg){
-    if(!Number.isFinite(prevDeg)) return vDeg;
-    let w=vDeg;
-    while(w-prevDeg>180) w-=360;
-    while(w-prevDeg<-180) w+=360;
-    return w;
-  }
-  function ikAlphaBeta(x, y, l, prevA, prevB){
-    const rho=Math.hypot(x,y);
-    const phi=Math.atan2(y,x);
-    const rhoC=Math.min(Math.max(rho, 1e-9), 2*l-1e-6);
-    const gamma=Math.acos(rhoC/(2*l));
-    let A1=deg(phi+gamma), B1=deg(phi-gamma);
-    let A2=deg(phi-gamma), B2=deg(phi+gamma);
-    A1=wrapNear(prevA, A1); B1=wrapNear(prevB, B1);
-    A2=wrapNear(prevA, A2); B2=wrapNear(prevB, B2);
-    if(Number.isFinite(prevA)){
-      const d1=Math.abs(A1-prevA)+Math.abs(B1-prevB);
-      const d2=Math.abs(A2-prevA)+Math.abs(B2-prevB);
-      if(d2<d1) return {A:A2, B:B2};
-    }
-    return {A:A1, B:B1};
-  }
-  function norm360(v){
-    let w=v%360;
-    if(w<0) w+=360;
-    return w;
+  ctx.lineWidth=2;
+  for(let i=1;i<pts.length;i++){
+    const p0=pts[i-1], p1=pts[i];
+    ctx.strokeStyle = smp[i].Z ? "#1a5cff" : "#aaa";
+    ctx.beginPath();
+    ctx.moveTo(tx(p0.x), ty(p0.y));
+    ctx.lineTo(tx(p1.x), ty(p1.y));
+    ctx.stroke();
   }
 
-  // ----- Build polyline with z -----
-  function buildPolylineWithZ(){
-    const pts=[];
-    const addSegment=(p0,p1,z,steps)=>{
-      for(let i=0;i<=steps;i++){
-        const t=i/steps;
-        pts.push({x:p0.x+(p1.x-p0.x)*t, y:p0.y+(p1.y-p0.y)*t, z:z});
-      }
-    };
-    for(let si=0; si<strokes.length; si++){
-      const s=strokes[si];
-      if(!s || s.length<1) continue;
-      if(travelOn.checked && pts.length){
-        const prev=pts[pts.length-1];
-        const start=s[0];
-        addSegment({x:prev.x,y:prev.y},{x:start.x,y:start.y},0,10);
-      }
-      for(const p of s){
-        pts.push({x:p.x,y:p.y,z:1});
-      }
-    }
-    return pts;
-  }
+  const idx=Math.floor(state.t)%pts.length;
+  const cur=pts[idx];
 
-  // ----- Arclength resample keeping z -----
-  function resampleArclength(pts, N){
-    if(pts.length<2){
-      return Array.from({length:N}, ()=>({x:0,y:0,z:0}));
-    }
-    const segL=[];
-    let total=0;
-    for(let i=1;i<pts.length;i++){
-      const d=Math.hypot(pts[i].x-pts[i-1].x, pts[i].y-pts[i-1].y);
-      const dd=Math.max(1e-6, d);
-      segL.push(dd);
-      total+=dd;
-    }
-    const outPts=[];
-    let si=0, acc=0;
-    for(let k=0;k<N;k++){
-      const target=(k/(N-1))*total;
-      while(si<segL.length-1 && acc+segL[si] < target){
-        acc+=segL[si];
-        si++;
-      }
-      const t=(target-acc)/segL[si];
-      const p0=pts[si], p1=pts[si+1];
-      const x=p0.x+(p1.x-p0.x)*t;
-      const y=p0.y+(p1.y-p0.y)*t;
-      let z;
-      if(p0.z===p1.z) z=p0.z;
-      else z=(t<0.5?p0.z:p1.z);
-      outPts.push({x,y,z});
-    }
-    return outPts;
-  }
+  ctx.fillStyle="#000";
+  ctx.beginPath(); ctx.arc(tx(0),ty(0),4,0,Math.PI*2); ctx.fill();
 
-  function updateOut(){
-    const N=parseInt(nRows.value,10);
-    const l=parseFloat(lArm.value);
-    const x0=parseFloat(x0Off.value);
-    const y0=parseFloat(y0Off.value);
+  ctx.strokeStyle="#000"; ctx.lineWidth=3;
+  ctx.beginPath();
+  ctx.moveTo(tx(0),ty(0));
+  ctx.lineTo(tx(cur.Ax),ty(cur.Ay));
+  ctx.lineTo(tx(cur.x),ty(cur.y));
+  ctx.stroke();
 
-    const poly=buildPolylineWithZ();
-    if(poly.length<2){
-      out.value="";
-      return;
-    }
-    const samp=resampleArclength(poly, N);
+  ctx.beginPath();
+  ctx.moveTo(tx(0),ty(0));
+  ctx.lineTo(tx(cur.Bx),ty(cur.By));
+  ctx.lineTo(tx(cur.x),ty(cur.y));
+  ctx.stroke();
 
-    let prevA=NaN, prevB=NaN;
-    const lines=[];
-    for(const p of samp){
-      const mmx=(p.x/360)*100;
-      const mmy=((360-p.y)/360)*100;
-      const X=x0+mmx;
-      const Y=y0+mmy;
-      const ab=ikAlphaBeta(X,Y,l,prevA,prevB);
-      prevA=ab.A; prevB=ab.B;
-      const A=norm360(ab.A), B=norm360(ab.B);
-      lines.push(`${A.toFixed(2)},${B.toFixed(2)},${p.z?1:0}`);
-    }
-    out.value=lines.join("\n");
-  }
+  ctx.fillStyle = smp[idx].Z ? "#1a5cff" : "#777";
+  ctx.beginPath(); ctx.arc(tx(cur.x),ty(cur.y),5,0,Math.PI*2); ctx.fill();
 
-  for(const el of [travelOn, lArm, x0Off, y0Off, nRows]){
-    el.addEventListener('input', updateOut);
-    el.addEventListener('change', updateOut);
-  }
+  ctx.fillStyle="#333"; ctx.font="12px system-ui";
+  ctx.fillText(`i=${idx}  α=${smp[idx].A.toFixed(1)}  β=${smp[idx].B.toFixed(1)}  z=${smp[idx].Z}`, 14, 18);
+}
 
-  updateOut();
+function tick(){
+(){
+  if(!state.playing) return;
+  state.t += 1; // 1 sample per frame
+  drawAnim();
+  state.raf = requestAnimationFrame(tick);
+}
+
+// ---------- recalc ----------
+function recalc(){
+  const rows=parseABZ(TA.value);
+  const l=parseFloat($('lArm').value);
+  const zMinDeg=parseFloat($('zMinDeg').value);
+  const idlePct=parseFloat($('idlePct').value);
+  const ratio=parseRatio($('zRatio').value);
+
+  const ev=expandWithZStops(rows);
+  const samples=buildWeightedSamples(ev, 360, zMinDeg, ratio, idlePct);
+
+  state.samples=samples;
+  state.t=0;
+
+  // build cams
+  const aR=camFromAngles(samples,'A', parseFloat($('aMin').value), parseFloat($('aMax').value));
+  const bR=camFromAngles(samples,'B', parseFloat($('bMin').value), parseFloat($('bMax').value));
+  const zR=camFromZ(samples, parseFloat($('zMin').value), parseFloat($('zMax').value));
+  const router=parseFloat($('rOuter').value);
+  const rhole=parseFloat($('rHole').value);
+
+  drawCam($('cvA'), aR, router, rhole, "α");
+  drawCam($('cvB'), bR, router, rhole, "β");
+  // Z canvas is wide; still draw centered
+  drawCam($('cvZ'), zR, router, rhole, "Z");
+
+  drawAnim();
+}
+
+$('btnRecalc').addEventListener('click', recalc);
+$('btnPlay').addEventListener('click', ()=>{
+  if(!state.samples.length) recalc();
+  state.playing=true;
+  cancelAnimationFrame(state.raf);
+  state.raf=requestAnimationFrame(tick);
+});
+$('btnPause').addEventListener('click', ()=>{
+  state.playing=false;
+  cancelAnimationFrame(state.raf);
+});
+
+$('btnSampleSquare').addEventListener('click', ()=>{ TA.value=sampleSquare(); recalc(); });
+$('btnSampleStar').addEventListener('click', ()=>{ TA.value=sampleStar(); recalc(); });
+
+$('btnPngA').addEventListener('click', ()=>downloadPNG($('cvA'), 'cam_alpha.png'));
+$('btnPngB').addEventListener('click', ()=>downloadPNG($('cvB'), 'cam_beta.png'));
+$('btnPngZ').addEventListener('click', ()=>downloadPNG($('cvZ'), 'cam_z.png'));
+$('btnPngAll').addEventListener('click', ()=>{
+  downloadPNG($('cvA'), 'cam_alpha.png');
+  setTimeout(()=>downloadPNG($('cvB'), 'cam_beta.png'), 150);
+  setTimeout(()=>downloadPNG($('cvZ'), 'cam_z.png'), 300);
+});
+
+// init
+TA.value = sampleSquare();
+recalc();
 </script>
 </body>
 </html>
