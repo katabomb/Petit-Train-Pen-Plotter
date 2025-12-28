@@ -1,0 +1,216 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+<title>線文(α,β,z) → 下絵PNG生成</title>
+<style>
+  :root{--bg:#fff;--fg:#111;--muted:#666;--panel:#f6f6f6;--border:#ddd;--btn:#111;--btnfg:#fff;}
+  body{margin:0;font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Hiragino Kaku Gothic ProN","Noto Sans JP",sans-serif;background:var(--bg);color:var(--fg);}
+  header{padding:12px 14px;border-bottom:1px solid var(--border);background:var(--bg);position:sticky;top:0;z-index:5;}
+  h1{font-size:16px;margin:0 0 6px 0;}
+  .sub{font-size:12px;color:var(--muted);line-height:1.4}
+  .wrap{max-width:1100px;margin:0 auto;padding:12px 14px;display:grid;grid-template-columns:1fr 1fr;gap:12px;align-items:start;}
+  @media (max-width:980px){.wrap{grid-template-columns:1fr;}}
+  .card{background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:10px;}
+  .row{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:6px 0;}
+  textarea{width:100%;height:240px;resize:vertical;border:1px solid var(--border);border-radius:8px;padding:10px;font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,"Liberation Mono","Courier New",monospace;font-size:12px;line-height:1.4;background:#fff;}
+  button{border:0;border-radius:10px;padding:10px 12px;background:var(--btn);color:var(--btnfg);font-weight:600}
+  button.secondary{background:#fff;color:#111;border:1px solid var(--border);}
+  button:active{transform:translateY(1px);}
+  label{font-size:12px;color:var(--muted);}
+  input[type="number"]{width:92px;padding:7px 8px;border-radius:8px;border:1px solid var(--border);background:#fff;}
+  .canvasWrap{display:flex;flex-direction:column;gap:8px;align-items:center;}
+  canvas{background:#fff;border:1px solid var(--border);border-radius:10px;touch-action:none;max-width:100%;height:auto;}
+  .hint{font-size:12px;color:var(--muted);line-height:1.5}
+  .ok{color:#0a7}.bad{color:#c33}
+</style>
+</head>
+<body>
+<header>
+  <h1>線文(α,β,z) → 下絵PNG生成</h1>
+  <div class="sub">貼り付けた線文（1行 = α,β,z）を固定スケールで描画し、下絵PNGを出力します（iPadは新規タブに画像表示→長押し保存）。</div>
+</header>
+
+<div class="wrap">
+  <div class="card">
+    <div class="row">
+      <button class="secondary" id="btnSample">サンプル</button>
+      <button id="btnRender">再描画</button>
+      <button id="btnPNG">PNG保存</button>
+      <span id="status" class="hint"></span>
+    </div>
+
+    <label>線文（1行 = α,β,z。区切りはカンマ推奨。z=1を描画、z=0を移動として扱います）</label>
+    <textarea id="txt"></textarea>
+
+    <div class="row">
+      <label>表示スケール: 1px =</label>
+      <input type="number" id="mmPerPx" step="0.01" value="0.20">
+      <label>mm（固定）</label>
+      <label style="margin-left:10px">原点(px): x=中央, y=</label>
+      <input type="number" id="originMarginPx" step="1" value="70">
+      <label>px下から</label>
+    </div>
+
+    <div class="row">
+      <label>75mmガイド中心Y（mm）</label>
+      <input type="number" id="guideCenterYmm" step="0.1" value="45.0">
+      <label>（カム生成の配置に合わせて上方向にずらす用）</label>
+    </div>
+
+    <div class="row">
+      <label>描画判定:</label>
+      <label><input type="radio" name="zdraw" value="1" checked> z=1 を描画</label>
+      <label><input type="radio" name="zdraw" value="0"> z=0 を描画</label>
+      <label style="margin-left:10px"><input type="checkbox" id="showGuide" checked> 75mmガイド表示</label>
+      <label><input type="checkbox" id="showOrigin" checked> 原点マーク</label>
+    </div>
+
+    <div class="hint"><span class="ok">ポイント：</span>拡大縮小フィットをしません。同じ設定なら何回出力しても同じサイズです。ズレる場合は「75mmガイド中心Y」だけ調整してください。</div>
+  </div>
+
+  <div class="card canvasWrap">
+    <canvas id="cv" width="900" height="900"></canvas>
+    <div class="hint">保存できない場合：Safariのポップアップブロック設定を確認してください。</div>
+  </div>
+</div>
+
+<script>
+const $ = (s)=>document.querySelector(s);
+const cv = $("#cv");
+const ctx = cv.getContext("2d");
+
+function parseLines(text){
+  const lines = text.split(/\r?\n/).map(s=>s.trim()).filter(s=>s.length);
+  const pts = [];
+  for(const line of lines){
+    const parts = line.split(/[,\s]+/).filter(Boolean);
+    if(parts.length < 2) continue;
+    const a = parseFloat(parts[0]);
+    const b = parseFloat(parts[1]);
+    const z = parts.length>=3 ? parseFloat(parts[2]) : 1;
+    if(!Number.isFinite(a) || !Number.isFinite(b) || !Number.isFinite(z)) continue;
+    pts.push({x:a, y:b, z:z});
+  }
+  return pts;
+}
+
+function mapping(){
+  const mmPerPx = parseFloat($("#mmPerPx").value);
+  const originMarginPx = parseFloat($("#originMarginPx").value);
+  const ox = cv.width/2;
+  const oy = cv.height - originMarginPx;
+  return {mmPerPx, ox, oy};
+}
+
+function worldToPx(xmm, ymm){
+  const {mmPerPx, ox, oy} = mapping();
+  return {px: ox + (xmm/mmPerPx), py: oy - (ymm/mmPerPx)};
+}
+
+function clearWhite(){
+  ctx.save();
+  ctx.setTransform(1,0,0,1,0,0);
+  ctx.fillStyle = "#fff";
+  ctx.fillRect(0,0,cv.width,cv.height);
+  ctx.restore();
+}
+
+function drawGuide(){
+  if(!$("#showGuide").checked) return;
+  const yC = parseFloat($("#guideCenterYmm").value);
+  const half = 75/2;
+  const p1 = worldToPx(-half, yC + half);
+  const p2 = worldToPx( half, yC - half);
+  ctx.save();
+  ctx.strokeStyle = "rgba(0,0,0,0.55)";
+  ctx.lineWidth = 2;
+  ctx.strokeRect(p1.px, p1.py, (p2.px-p1.px), (p2.py-p1.py));
+  ctx.restore();
+}
+
+function drawOrigin(){
+  if(!$("#showOrigin").checked) return;
+  const p = worldToPx(0,0);
+  ctx.save();
+  ctx.strokeStyle = "rgba(0,0,0,0.55)";
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(p.px-10, p.py); ctx.lineTo(p.px+10, p.py);
+  ctx.moveTo(p.px, p.py-10); ctx.lineTo(p.px, p.py+10);
+  ctx.stroke();
+  ctx.restore();
+}
+
+function render(){
+  clearWhite();
+  drawGuide();
+  drawOrigin();
+
+  const pts = parseLines($("#txt").value);
+  if(!pts.length){
+    $("#status").innerHTML = '<span class="bad">線文が空です</span>';
+    return;
+  }
+  const zDraw = parseInt(document.querySelector('input[name="zdraw"]:checked').value,10);
+
+  ctx.save();
+  ctx.strokeStyle = "#000";
+  ctx.lineWidth = 2;
+  ctx.lineCap = "round";
+  ctx.lineJoin = "round";
+
+  let prev = null;
+  ctx.beginPath();
+  for(const cur of pts){
+    const p = worldToPx(cur.x, cur.y);
+    if(!prev){
+      ctx.moveTo(p.px, p.py);
+    }else{
+      const drawSeg = (prev.z === zDraw) && (cur.z === zDraw);
+      if(drawSeg){
+        ctx.lineTo(p.px, p.py);
+      }else{
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(p.px, p.py);
+      }
+    }
+    prev = cur;
+  }
+  ctx.stroke();
+  ctx.restore();
+
+  $("#status").textContent = `点数: ${pts.length}（z=${zDraw}を描画）`;
+}
+
+function exportPNG(){
+  const dataURL = cv.toDataURL("image/png");
+  const w = window.open("");
+  if(!w){
+    alert("ポップアップがブロックされました");
+    return;
+  }
+  w.document.write('<img src="'+dataURL+'" style="max-width:100%;height:auto;">');
+}
+
+const SAMPLE = [
+  "0,45,1",
+  "20,45,1",
+  "20,65,1",
+  "0,65,1",
+  "0,45,1",
+  "0,45,0",
+  "0,0,0"
+].join("\n");
+
+$("#btnSample").addEventListener("click", ()=>{ $("#txt").value = SAMPLE; render(); });
+$("#btnRender").addEventListener("click", render);
+$("#btnPNG").addEventListener("click", exportPNG);
+
+$("#txt").value = SAMPLE;
+render();
+</script>
+</body>
+</html>
