@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>プチ電車ペンプロッタ｜完成図PNG（軌跡のみ）</title>
+<style>
+body{margin:0;font-family:system-ui;background:#fff;color:#111}
+header{padding:10px;border-bottom:1px solid #ccc}
+main{padding:10px}
+button{padding:8px 12px;border-radius:8px;border:none;background:#111;color:#fff}
+canvas{border:1px solid #ccc;border-radius:8px;background:#fff}
+</style>
+</head>
+<body>
+
+<header>
+<h2>完成図（ペン軌跡のみ）PNG保存</h2>
+<button id="btnPNG">PNG保存</button>
+</header>
+
+<main>
+<canvas id="cvAnim" width="900" height="900"></canvas>
+<canvas id="cvDrawOnly" width="900" height="900" style="display:none"></canvas>
+</main>
+
+<script>
+// ===============================
+// サンプル：実際はここを
+// カム生成アプリの pts / smp に置き換える
+// ===============================
+const pts = [
+  {x:0,y:45},{x:20,y:45},{x:20,y:65},
+  {x:0,y:65},{x:0,y:45}
+];
+const smp = pts.map(()=>({Z:1}));
+
+// 描画スケール（75mm正方形基準）
+const S_DRAW = 5;
+const OX_DRAW = 450;
+const OY_DRAW = 450;
+
+// ===============================
+// 表示用（アニメ代替）
+// ===============================
+const cvA = document.getElementById("cvAnim");
+const ctxA = cvA.getContext("2d");
+
+function drawAnim(){
+  ctxA.clearRect(0,0,900,900);
+  ctxA.strokeStyle="#aaa";
+  ctxA.strokeRect(
+    OX_DRAW-75*S_DRAW/2,
+    OY_DRAW-75*S_DRAW/2,
+    75*S_DRAW,
+    75*S_DRAW
+  );
+
+  ctxA.strokeStyle="#1a63ff";
+  ctxA.lineWidth=2;
+  ctxA.beginPath();
+  pts.forEach((p,i)=>{
+    const x=OX_DRAW+p.x*S_DRAW;
+    const y=OY_DRAW-p.y*S_DRAW;
+    if(i===0) ctxA.moveTo(x,y);
+    else ctxA.lineTo(x,y);
+  });
+  ctxA.stroke();
+}
+drawAnim();
+
+// ===============================
+// PNG保存用：ペン軌跡のみ
+// ===============================
+function drawPenOnlyCanvas(){
+  const cv = document.getElementById("cvDrawOnly");
+  const ctx = cv.getContext("2d");
+
+  ctx.setTransform(1,0,0,1,0,0);
+  ctx.clearRect(0,0,900,900);
+  ctx.fillStyle="#fff";
+  ctx.fillRect(0,0,900,900);
+
+  ctx.strokeStyle="#000";
+  ctx.lineWidth=2;
+  ctx.lineCap="round";
+  ctx.lineJoin="round";
+
+  ctx.beginPath();
+  let first=true;
+  for(let i=1;i<pts.length;i++){
+    if(smp[i].Z===0){first=true;continue;}
+    const p0=pts[i-1], p1=pts[i];
+    if(first){
+      ctx.moveTo(OX_DRAW+p0.x*S_DRAW, OY_DRAW-p0.y*S_DRAW);
+      first=false;
+    }
+    ctx.lineTo(OX_DRAW+p1.x*S_DRAW, OY_DRAW-p1.y*S_DRAW);
+  }
+  ctx.stroke();
+}
+
+// ===============================
+// PNG保存（iPad対応）
+// ===============================
+function openPNGTab(canvas){
+  const url = canvas.toDataURL("image/png");
+  const w = window.open("");
+  if(!w){ alert("ポップアップがブロックされました"); return; }
+  w.document.write(`<img src="${url}" style="max-width:100%">`);
+}
+
+document.getElementById("btnPNG").onclick=()=>{
+  drawPenOnlyCanvas();
+  openPNGTab(document.getElementById("cvDrawOnly"));
+};
+</script>
+
+</body>
+</html>
