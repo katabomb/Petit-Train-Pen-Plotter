@@ -1,42 +1,153 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="ja">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Petit Train Pen Plotter - Link</title>
+  <title>プチ電車ペンプロッタ2｜Drawing → Plotter ハブ</title>
+  <style>
+    :root{--bg:#fff;--fg:#111;--muted:#555;--line:#ddd;--btn:#f7f7f7;}
+    body{margin:0;font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto;background:var(--bg);color:var(--fg);}
+    header{padding:10px 12px;border-bottom:1px solid var(--line);display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+    header h1{font-size:14px;margin:0 12px 0 0}
+    button{border:1px solid var(--line);background:var(--btn);border-radius:10px;padding:8px 10px;cursor:pointer}
+    button:hover{background:#f0f0f0}
+    .small{font-size:12px;color:var(--muted)}
+    .wrap{display:grid;grid-template-columns: 1fr 1fr;gap:10px;padding:10px}
+    .pane{border:1px solid var(--line);border-radius:12px;overflow:hidden;min-height:70vh;background:#fff}
+    iframe{width:100%;height:70vh;border:0;display:block;background:#fff}
+    .bar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;padding:8px;border-bottom:1px solid var(--line);background:#fff}
+    .bar .sp{flex:1}
+    textarea{width:100%;height:110px;border:1px solid var(--line);border-radius:10px;padding:8px;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12px}
+    .grid2{display:grid;grid-template-columns: 1fr; gap:8px; padding:8px}
+    .hint{font-size:12px;color:var(--muted);line-height:1.4}
+    @media (max-width: 980px){
+      .wrap{grid-template-columns: 1fr}
+      iframe{height:62vh}
+    }
+  </style>
 </head>
 <body>
-  <h1>Petit-Train Pen Plotter</h1>
-  <p>
-    <a href="line_drawing_to_strokes_app_ipad_v0_1" rel="noopener noreferrer">
-      line_drawing_to_strokes_app_ipad_v0_1 を開く
-    </a>
-  </p>
-    <p>
-    <a href="puchi_train_cam_app_full.html" rel="noopener noreferrer">
-      puchi_train_cam_app_full.html を開く
-    </a>
-  </p>
-      <p>
-    <a href="puchi_train_cam_app_v2.html" rel="noopener noreferrer">
-      puchi_train_cam_app_v2.html を開く
-    </a>
-  </p>
-  <p>
-    <a href="puchi_train_cam_app_v2_5_strokePreview_perCamPNG.html" rel="noopener noreferrer">
-      puchi_train_cam_app_v2_5_strokePreview_perCamPNG.html を開く
-    </a>
-  </p>
-  <p>
-    <a href="line_drawing_to_strokes_app_v0_3_0.html" rel="noopener noreferrer">
-      line_drawing_to_strokes_app_v0_3_0.html を開く
-    </a>
-  </p>
-  <p>
-    <a href="line_drawing_to_strokes_app_v0_3_1.html" rel="noopener noreferrer">
-      line_drawing_to_strokes_app_v0_3_1.html を開く
-    </a>
-  </p>
+<header>
+  <h1>Drawing → Plotter ハブ</h1>
+  <button id="btnTransfer">① Drawing出力 → Plotter入力へ転送</button>
+  <button id="btnRecalc">② Plotterで「再計算」実行</button>
+  <span class="sp"></span>
+  <span class="small">同一オリジン（同じGitHub Pages配下）で動きます</span>
+</header>
+
+<div class="wrap">
+  <section class="pane">
+    <div class="bar">
+      <strong class="small">左：drawing_to_abz</strong>
+      <span class="sp"></span>
+      <button id="btnOpenDrawing">別タブで開く</button>
+    </div>
+    <iframe id="ifDrawing" src="drawing_to_abz.html" title="drawing_to_abz"></iframe>
+    <div class="grid2">
+      <div class="hint">※ drawing側の出力テキスト（α,β,z）は自動で拾いにいきます（#out）。</div>
+      <textarea id="taMirror" placeholder="（任意）ここに貼ってもOK：転送ボタンでPlotterへ送れます"></textarea>
+    </div>
+  </section>
+
+  <section class="pane">
+    <div class="bar">
+      <strong class="small">右：plotter_abz_cam</strong>
+      <span class="sp"></span>
+      <button id="btnOpenPlotter">別タブで開く</button>
+    </div>
+    <iframe id="ifPlotter" src="plotter_abz_cam.html" title="plotter_abz_cam"></iframe>
+    <div class="grid2">
+      <div class="hint">転送後、必要なら「再計算」も押します（#btnRecalc をクリック）。</div>
+    </div>
+  </section>
+</div>
+
+<script>
+  const $ = (id)=>document.getElementById(id);
+
+  const KEY = "puchi_abz_csv_v1"; // localStorageにも保存して「保険」をかける
+
+  function safeGetDoc(iframe){
+    try{
+      return iframe.contentWindow.document;
+    }catch(e){
+      return null; // オリジンが違うと触れません
+    }
+  }
+
+  function getDrawingCSV(){
+    // 1) 手動ミラー欄が優先
+    const manual = $('taMirror').value.trim();
+    if(manual) return manual;
+
+    // 2) drawing iframe の #out を読む
+    const ddoc = safeGetDoc($('ifDrawing'));
+    if(ddoc){
+      const out = ddoc.getElementById('out');
+      if(out && typeof out.value === 'string' && out.value.trim()){
+        return out.value.trim();
+      }
+    }
+
+    // 3) localStorage の保険
+    const saved = localStorage.getItem(KEY);
+    if(saved && saved.trim()) return saved.trim();
+
+    return "";
+  }
+
+  function setPlotterCSV(csv){
+    const pdoc = safeGetDoc($('ifPlotter'));
+    if(!pdoc) return { ok:false, reason:"plotter iframeにアクセスできません（オリジン違いの可能性）" };
+
+    const ta = pdoc.getElementById('ta');
+    if(!ta) return { ok:false, reason:"plotter側の textarea#ta が見つかりません" };
+
+    ta.value = csv;
+
+    // 入力イベントを投げて、アプリ側が反応する可能性を上げる
+    ta.dispatchEvent(new Event('input', { bubbles:true }));
+    ta.dispatchEvent(new Event('change', { bubbles:true }));
+
+    return { ok:true };
+  }
+
+  function clickPlotterRecalc(){
+    const pdoc = safeGetDoc($('ifPlotter'));
+    if(!pdoc) return { ok:false, reason:"plotter iframeにアクセスできません" };
+    const btn = pdoc.getElementById('btnRecalc');
+    if(!btn) return { ok:false, reason:"plotter側の #btnRecalc が見つかりません" };
+    btn.click();
+    return { ok:true };
+  }
+
+  $('btnTransfer').addEventListener('click', ()=>{
+    const csv = getDrawingCSV();
+    if(!csv){
+      alert("転送するデータがありません。\n・左のdrawingで線を描く\n・または下のミラー欄に貼り付け\nのどちらかをしてください。");
+      return;
+    }
+    localStorage.setItem(KEY, csv);
+
+    const r = setPlotterCSV(csv);
+    if(!r.ok){
+      alert("転送に失敗しました：\n" + r.reason + "\n\n対策：両方のHTMLを同じGitHub Pages配下に置いてください。");
+      return;
+    }
+    alert("転送しました ✅");
+  });
+
+  $('btnRecalc').addEventListener('click', ()=>{
+    const r = clickPlotterRecalc();
+    if(!r.ok) alert("再計算クリックに失敗：\n" + r.reason);
+  });
+
+  $('btnOpenDrawing').addEventListener('click', ()=> window.open('drawing_to_abz.html', '_blank'));
+  $('btnOpenPlotter').addEventListener('click', ()=> window.open('plotter_abz_cam.html', '_blank'));
+
+  // ページを開いた瞬間に、保存済みがあればミラー欄へ入れておく（任意）
+  const saved = localStorage.getItem(KEY);
+  if(saved && saved.trim()) $('taMirror').value = saved.trim();
+</script>
 </body>
 </html>
-
