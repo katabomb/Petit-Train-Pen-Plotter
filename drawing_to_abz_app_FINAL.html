@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<title>Drawing to ABZ FINAL</title>
+<style>
+  body { font-family: sans-serif; background:#f5f5f5; }
+  .toolbar { margin: 6px 0; }
+  button { margin-right:6px; }
+  #wrap { position: relative; width: 600px; margin:auto; }
+  canvas { position:absolute; left:0; top:0; border:1px solid #aaa; background:#fff; }
+</style>
+</head>
+<body>
+
+<h2>お絵描き → ABZ → PNG（完成版）</h2>
+
+<div class="toolbar">
+  <button id="undoBtn">Undo</button>
+  <button id="clearBtn">Clear</button>
+  <input type="file" id="bgInput">
+</div>
+
+<div class="toolbar">
+  <button onclick="exportABZ()">ABZ出力</button>
+  <button onclick="exportPNG()">PNG保存（下絵用）</button>
+</div>
+
+<div id="wrap">
+  <canvas id="bg"    width="600" height="600"></canvas>
+  <canvas id="grid"  width="600" height="600"></canvas>
+  <canvas id="draw"  width="600" height="600"></canvas>
+</div>
+
+<textarea id="out" rows="8" cols="80" placeholder="ABZ出力"></textarea>
+
+<canvas id="exportCanvas" width="900" height="900" style="display:none"></canvas>
+
+<script>
+const draw = document.getElementById("draw");
+const ctx = draw.getContext("2d");
+const grid = document.getElementById("grid").getContext("2d");
+const bg   = document.getElementById("bg").getContext("2d");
+
+let drawing = false;
+let strokes = [];
+let current = [];
+
+const DPI = 300;
+const MM_TO_PX = DPI / 25.4;
+
+// ---- グリッド ----
+(function drawGrid(){
+  grid.strokeStyle="#eee";
+  for(let i=0;i<=600;i+=50){
+    grid.beginPath(); grid.moveTo(i,0); grid.lineTo(i,600); grid.stroke();
+    grid.beginPath(); grid.moveTo(0,i); grid.lineTo(600,i); grid.stroke();
+  }
+})();
+
+// ---- 描画 ----
+draw.addEventListener("pointerdown", e=>{
+  drawing = true;
+  current = [];
+  ctx.beginPath();
+  const p = pos(e);
+  ctx.moveTo(p.x,p.y);
+  current.push(p);
+});
+draw.addEventListener("pointermove", e=>{
+  if(!drawing) return;
+  const p = pos(e);
+  ctx.lineTo(p.x,p.y);
+  ctx.stroke();
+  current.push(p);
+});
+draw.addEventListener("pointerup", ()=>{
+  if(drawing && current.length>1) strokes.push(current);
+  drawing=false;
+});
+
+function pos(e){
+  const r = draw.getBoundingClientRect();
+  return { x:e.clientX-r.left, y:e.clientY-r.top };
+}
+
+// ---- Undo / Clear ----
+undoBtn.onclick = ()=>{
+  strokes.pop();
+  redraw();
+};
+clearBtn.onclick = ()=>{
+  strokes=[];
+  redraw();
+};
+
+function redraw(){
+  ctx.clearRect(0,0,600,600);
+  ctx.beginPath();
+  strokes.forEach(s=>{
+    ctx.moveTo(s[0].x,s[0].y);
+    s.forEach(p=>ctx.lineTo(p.x,p.y));
+  });
+  ctx.stroke();
+}
+
+// ---- 下絵 ----
+bgInput.onchange = e=>{
+  const img=new Image();
+  img.onload=()=>bg.drawImage(img,0,0,600,600);
+  img.src=URL.createObjectURL(e.target.files[0]);
+};
+
+// ---- ABZ出力（簡易：XY→αβz placeholder）----
+function exportABZ(){
+  let out="";
+  strokes.forEach(s=>{
+    s.forEach(p=>{
+      out += `${p.x.toFixed(2)},${p.y.toFixed(2)},1\n`;
+    });
+    out += `${s[s.length-1].x.toFixed(2)},${s[s.length-1].y.toFixed(2)},0\n`;
+  });
+  document.getElementById("out").value = out;
+}
+
+// ---- PNG保存（下絵流用）----
+function exportPNG(){
+  const cvs = document.getElementById("exportCanvas");
+  const c = cvs.getContext("2d");
+
+  c.fillStyle="#fff";
+  c.fillRect(0,0,900,900);
+
+  const sizePx = 75 * MM_TO_PX;
+  const ox = (900-sizePx)/2;
+  const oy = (900-sizePx)/2;
+
+  c.strokeStyle="#000";
+  c.lineWidth=1;
+  c.beginPath();
+
+  strokes.forEach(s=>{
+    c.moveTo(ox+s[0].x*MM_TO_PX/8, oy+s[0].y*MM_TO_PX/8);
+    s.forEach(p=>{
+      c.lineTo(ox+p.x*MM_TO_PX/8, oy+p.y*MM_TO_PX/8);
+    });
+  });
+  c.stroke();
+
+  const url = cvs.toDataURL("image/png");
+  const w = window.open("");
+  w.document.write('<img src="'+url+'" style="max-width:100%">');
+}
+</script>
+
+</body>
+</html>
