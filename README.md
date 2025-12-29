@@ -29,12 +29,7 @@
 
 ## 🌐 公開方法（GitHub Pages）
 
-1. このリポジトリを GitHub にアップロード  
-2. Settings → Pages  
-3. `Deploy from a branch` → `main / (root)` を選択  
-4. 発行された URL にアクセス  
-
-`index.html` が自動的にハブとして表示されます。
+- [https://katabomb.github.io/Petit-Train-Pen-Plotter/](https://katabomb.github.io/Petit-Train-Pen-Plotter/)
 
 ---
 
