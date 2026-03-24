@@ -1,0 +1,347 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>RAW5 → αβz 変換</title>
+<style>
+  body{margin:0;font-family:system-ui,-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,sans-serif;background:#fff;color:#111}
+  .toolbar{display:flex;flex-wrap:wrap;gap:10px;align-items:center;padding:8px;border-bottom:1px solid #ccc}
+  .toolbar label{font-size:12px;white-space:nowrap}
+  .wrap{display:flex;gap:12px;padding:8px;height:calc(100vh - 58px);box-sizing:border-box}
+  .pane{flex:1 1 0;display:flex;flex-direction:column;min-width:280px}
+  .pane h3{margin:0 0 6px 0;font-size:14px;font-weight:600}
+  textarea{flex:1 1 auto;width:100%;box-sizing:border-box;resize:none;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,"Liberation Mono",monospace;font-size:12px;line-height:1.4;padding:8px}
+  .hint{padding:0 8px 8px;font-size:12px;color:#444}
+  .status{margin-left:auto;font-size:12px;color:#444}
+  button{cursor:pointer}
+  input[type="number"]{width:72px}
+</style>
+</head>
+<body>
+
+<div class="toolbar">
+  <label>ファイル読み込み <input type="file" id="fileInput" accept=".txt,.csv,.raw,.raw5,text/plain"></label>
+  <label>l <input type="number" id="lArm" value="90" step="1" min="1"> mm</label>
+  <label>x0 <input type="number" id="x0Off" value="0" step="1"></label>
+  <label>y0 <input type="number" id="y0Off" value="0" step="1"></label>
+  <label>行数
+    <select id="nRows">
+      <option value="360" selected>360</option>
+      <option value="720">720</option>
+    </select>
+  </label>
+  <button id="recalcBtn" type="button">再計算</button>
+  <button id="copyBtn" type="button">出力をコピー</button>
+  <span id="status" class="status"></span>
+</div>
+
+<div class="hint">RAW5を貼り付けて再計算すると、変換元アプリと同じ座標系ロジックで α,β,z を生成します。</div>
+
+<div class="wrap">
+  <div class="pane">
+    <h3>RAW5入力</h3>
+    <textarea id="raw5Input" spellcheck="false"></textarea>
+  </div>
+  <div class="pane">
+    <h3>α,β,z 出力</h3>
+    <textarea id="abzOutput" spellcheck="false"></textarea>
+  </div>
+</div>
+
+<script>
+(function(){
+  "use strict";
+
+  const $ = (id) => document.getElementById(id);
+
+  const fileInput = $("fileInput");
+  const raw5Input = $("raw5Input");
+  const abzOutput = $("abzOutput");
+  const lArm = $("lArm");
+  const x0Off = $("x0Off");
+  const y0Off = $("y0Off");
+  const nRows = $("nRows");
+  const recalcBtn = $("recalcBtn");
+  const copyBtn = $("copyBtn");
+  const status = $("status");
+
+  function setStatus(text){
+    status.textContent = text || "";
+  }
+
+  function packFrame(penUp, x, y){
+    const xi = Math.max(0, Math.min(255, Math.round(x))) & 0xff;
+    const yi = Math.max(0, Math.min(255, Math.round(y))) & 0xff;
+    const v = ((yi & 0xff) << 8) | (xi & 0xff);
+    return (penUp ? "1" : "0") + v.toString(16).toUpperCase().padStart(4, "0");
+  }
+
+  function unpackFrame(frame){
+    if (typeof frame !== "string" || !/^[01][0-9A-Fa-f]{4}$/.test(frame)) {
+      throw new Error("不正なRAW5フレームがあります: " + frame);
+    }
+    const penUp = frame[0] === "1";
+    const v = parseInt(frame.slice(1), 16);
+    const y = (v >> 8) & 0xff;
+    const x = v & 0xff;
+    return { penUp, x, y };
+  }
+
+  function parseRAW5(text){
+    const cleaned = String(text || "").replace(/\s+/g, "").toUpperCase();
+    if (cleaned.length === 0) return [];
+    if (cleaned.length % 5 !== 0) {
+      throw new Error("RAW5文字数が5の倍数ではありません。");
+    }
+    const frames = [];
+    for (let i = 0; i < cleaned.length; i += 5) {
+      const frame = cleaned.slice(i, i + 5);
+      if (!/^[01][0-9A-F]{4}$/.test(frame)) {
+        throw new Error("RAW5形式エラー: " + frame);
+      }
+      frames.push(frame);
+    }
+    return frames;
+  }
+
+  function framesToRAW5(frames, withSpaces = false, perLine = 0){
+    if (!Array.isArray(frames) || frames.length === 0) return "";
+    if (!withSpaces && !perLine) return frames.join("");
+    const out = [];
+    for (let i = 0; i < frames.length; i++) {
+      out.push(frames[i]);
+      const needSpace = withSpaces && i < frames.length - 1 && !(perLine > 0 && (i + 1) % perLine === 0);
+      if (needSpace) out.push(" ");
+      if (perLine > 0 && (i + 1) % perLine === 0 && i < frames.length - 1) out.push("\n");
+    }
+    return out.join("");
+  }
+
+  function parseRaw5(text){
+    return parseRAW5(text);
+  }
+
+  function framesToPath(frames){
+    return frames.map((frame) => {
+      const p = unpackFrame(frame);
+      return { x: p.x, y: p.y, z: p.penUp ? 0 : 1 };
+    });
+  }
+
+  function buildPolylineWithZ(points){
+    if (!points.length) return [];
+    const out = [];
+    for (let i = 0; i < points.length; i++) {
+      const p = points[i];
+      if (i === 0) {
+        out.push({ x: p.x, y: p.y, z: p.z });
+        continue;
+      }
+      const prev = points[i - 1];
+      const dx = p.x - prev.x;
+      const dy = p.y - prev.y;
+      const d = Math.hypot(dx, dy);
+      const steps = Math.max(1, Math.ceil(d));
+      for (let s = 1; s <= steps; s++) {
+        const t = s / steps;
+        out.push({
+          x: prev.x + dx * t,
+          y: prev.y + dy * t,
+          z: p.z
+        });
+      }
+    }
+    return out;
+  }
+
+  function resamplePath(points, count){
+    if (!Array.isArray(points) || points.length === 0) return [];
+    if (points.length === 1) {
+      return Array.from({ length: count }, () => ({ x: points[0].x, y: points[0].y, z: points[0].z }));
+    }
+
+    const segL = [];
+    let total = 0;
+    for (let i = 1; i < points.length; i++) {
+      const d = Math.hypot(points[i].x - points[i - 1].x, points[i].y - points[i - 1].y);
+      const dd = Math.max(1e-9, d);
+      segL.push(dd);
+      total += dd;
+    }
+
+    if (total <= 1e-9) {
+      const p = points[0];
+      return Array.from({ length: count }, () => ({ x: p.x, y: p.y, z: p.z }));
+    }
+
+    const out = [];
+    let si = 0;
+    let acc = 0;
+
+    for (let k = 0; k < count; k++) {
+      const target = (k / (count - 1)) * total;
+      while (si < segL.length - 1 && acc + segL[si] < target) {
+        acc += segL[si];
+        si++;
+      }
+      const p0 = points[si];
+      const p1 = points[si + 1];
+      const len = segL[si];
+      const t = len > 0 ? (target - acc) / len : 0;
+      const x = p0.x + (p1.x - p0.x) * t;
+      const y = p0.y + (p1.y - p0.y) * t;
+      const z = (p0.z === p1.z) ? p0.z : (t < 0.5 ? p0.z : p1.z);
+      out.push({ x, y, z });
+    }
+    return out;
+  }
+
+  function deg(rad){
+    return rad * 180 / Math.PI;
+  }
+
+  function wrapNear(prevDeg, vDeg){
+    if (!Number.isFinite(prevDeg)) return vDeg;
+    let w = vDeg;
+    while (w - prevDeg > 180) w -= 360;
+    while (w - prevDeg < -180) w += 360;
+    return w;
+  }
+
+  function ikSolvePoint(X, Y, l, prevA, prevB){
+    const rho = Math.hypot(X, Y);
+    const phi = Math.atan2(Y, X);
+    const rhoC = Math.min(Math.max(rho, 1e-9), 2 * l - 1e-6);
+    const gamma = Math.acos(rhoC / (2 * l));
+
+    let A1 = deg(phi + gamma);
+    let B1 = deg(phi - gamma);
+    let A2 = deg(phi - gamma);
+    let B2 = deg(phi + gamma);
+
+    A1 = wrapNear(prevA, A1);
+    B1 = wrapNear(prevB, B1);
+    A2 = wrapNear(prevA, A2);
+    B2 = wrapNear(prevB, B2);
+
+    if (Number.isFinite(prevA)) {
+      const d1 = Math.abs(A1 - prevA) + Math.abs(B1 - prevB);
+      const d2 = Math.abs(A2 - prevA) + Math.abs(B2 - prevB);
+      if (d2 < d1) return { a: A2, b: B2 };
+    }
+    return { a: A1, b: B1 };
+  }
+
+  function ikSolve(path, l){
+    let prevA = NaN;
+    let prevB = NaN;
+    const out = [];
+    for (const p of path) {
+      const ab = ikSolvePoint(p.X, p.Y, l, prevA, prevB);
+      prevA = ab.a;
+      prevB = ab.b;
+      out.push({ a: ab.a, b: ab.b, z: p.z });
+    }
+    return out;
+  }
+
+  function norm360(v){
+    let w = v % 360;
+    if (w < 0) w += 360;
+    return w;
+  }
+
+  function getMappingParams(){
+    const W = 360;
+    const H = 360;
+    const l = parseFloat(lArm.value || "90");
+    const yC = Math.SQRT2 * l;
+    const safePx = Math.min(W, H) * 0.72;
+    const mmPerPx = 75 / safePx;
+    return { W, H, l, yC, mmPerPx };
+  }
+
+  function raw5CoordToCanvasPx(x, y){
+    return { px: x * 2, py: y * 2 };
+  }
+
+  function screenToWorld(px, py){
+    const { W, H, yC, mmPerPx } = getMappingParams();
+    const x = (px - W / 2) * mmPerPx;
+    const y = yC + (H / 2 - py) * mmPerPx;
+    return { x, y };
+  }
+
+  function buildWorldPath(resampledPoints){
+    const x0 = parseFloat(x0Off.value || "0");
+    const y0 = parseFloat(y0Off.value || "0");
+    return resampledPoints.map((p) => {
+      const cv = raw5CoordToCanvasPx(p.x, p.y);
+      const w = screenToWorld(cv.px, cv.py);
+      return {
+        X: x0 + w.x,
+        Y: y0 + w.y,
+        z: p.z ? 1 : 0
+      };
+    });
+  }
+
+  function buildABZ(list){
+    return list.map((v) => `${norm360(v.a).toFixed(2)},${norm360(v.b).toFixed(2)},${v.z ? 1 : 0}`).join("\n");
+  }
+
+  function recalc(){
+    try {
+      const frames = parseRaw5(raw5Input.value);
+      if (frames.length === 0) {
+        abzOutput.value = "";
+        setStatus("");
+        return;
+      }
+      const points = framesToPath(frames);
+      const dense = buildPolylineWithZ(points);
+      const count = parseInt(nRows.value, 10);
+      const sampled = resamplePath(dense, count);
+      const worldPath = buildWorldPath(sampled);
+      const l = parseFloat(lArm.value || "90");
+      const solved = ikSolve(worldPath, l);
+      abzOutput.value = buildABZ(solved);
+      setStatus(`入力 ${frames.length}フレーム → 出力 ${solved.length}行`);
+    } catch (err) {
+      abzOutput.value = "";
+      setStatus(err && err.message ? err.message : "変換エラー");
+    }
+  }
+
+  fileInput.addEventListener("change", (e) => {
+    const file = e.target.files && e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      raw5Input.value = String(reader.result || "");
+      recalc();
+    };
+    reader.readAsText(file);
+  });
+
+  recalcBtn.addEventListener("click", recalc);
+
+  copyBtn.addEventListener("click", async () => {
+    try {
+      await navigator.clipboard.writeText(abzOutput.value);
+      setStatus("出力をコピーしました");
+    } catch (_) {
+      setStatus("コピーできませんでした");
+    }
+  });
+
+  lArm.addEventListener("input", recalc);
+  x0Off.addEventListener("input", recalc);
+  y0Off.addEventListener("input", recalc);
+  nRows.addEventListener("change", recalc);
+
+})();
+</script>
+</body>
+</html>
