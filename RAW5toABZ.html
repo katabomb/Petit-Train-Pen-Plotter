@@ -129,6 +129,21 @@
     });
   }
 
+  function closePathIfNeeded(points){
+    if (!Array.isArray(points) || points.length === 0) return [];
+    const out = points.slice();
+    const first = out[0];
+    const last = out[out.length - 1];
+    if (first.x !== last.x || first.y !== last.y) {
+      out.push({
+        x: first.x,
+        y: first.y,
+        z: 0
+      });
+    }
+    return out;
+  }
+
   function buildPolylineWithZ(points){
     if (!points.length) return [];
     const out = [];
@@ -300,14 +315,15 @@
         return;
       }
       const points = framesToPath(frames);
-      const dense = buildPolylineWithZ(points);
+      const closedPoints = closePathIfNeeded(points);
+      const dense = buildPolylineWithZ(closedPoints);
       const count = parseInt(nRows.value, 10);
       const sampled = resamplePath(dense, count);
       const worldPath = buildWorldPath(sampled);
       const l = parseFloat(lArm.value || "90");
       const solved = ikSolve(worldPath, l);
       abzOutput.value = buildABZ(solved);
-      setStatus(`入力 ${frames.length}フレーム → 出力 ${solved.length}行`);
+      setStatus(`入力 ${frames.length}フレーム → 閉路補正後 ${closedPoints.length}点 → 出力 ${solved.length}行`);
     } catch (err) {
       abzOutput.value = "";
       setStatus(err && err.message ? err.message : "変換エラー");
