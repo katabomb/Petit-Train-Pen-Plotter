@@ -1,0 +1,818 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>カム生成アプリ</title>
+<style>
+  :root {
+    --bg: #0f0f0f;
+    --panel: #1a1a1a;
+    --border: #2e2e2e;
+    --accent: #e8e0d0;
+    --dim: #888;
+    --blue: #4a9eff;
+    --green: #4dff9a;
+    --red: #ff4d6a;
+    --gold: #f0c040;
+    --font-mono: 'Courier New', monospace;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: var(--bg);
+    color: var(--accent);
+    font-family: var(--font-mono);
+    font-size: 12px;
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+  #header {
+    background: var(--panel);
+    border-bottom: 1px solid var(--border);
+    padding: 6px 12px;
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    flex-shrink: 0;
+  }
+  #header h1 {
+    font-size: 13px;
+    letter-spacing: 0.15em;
+    color: var(--gold);
+    font-weight: normal;
+  }
+  #main {
+    display: flex;
+    flex: 1;
+    overflow: hidden;
+  }
+  #sidebar {
+    width: 210px;
+    background: var(--panel);
+    border-right: 1px solid var(--border);
+    overflow-y: auto;
+    padding: 10px;
+    flex-shrink: 0;
+  }
+  .sec-label {
+    color: var(--gold);
+    font-size: 10px;
+    letter-spacing: 0.1em;
+    margin: 10px 0 4px;
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 2px;
+  }
+  .sec-label:first-child { margin-top: 0; }
+  label { display: block; color: var(--dim); margin-bottom: 1px; font-size: 10px; }
+  input[type=text], input[type=number], textarea {
+    width: 100%;
+    background: #111;
+    border: 1px solid var(--border);
+    color: var(--accent);
+    font-family: var(--font-mono);
+    font-size: 11px;
+    padding: 3px 5px;
+    margin-bottom: 5px;
+    outline: none;
+  }
+  input:focus, textarea:focus { border-color: var(--gold); }
+  textarea { resize: vertical; min-height: 100px; }
+  .row-2 { display: flex; gap: 5px; }
+  .row-2 > * { flex: 1; }
+  button {
+    background: #222;
+    border: 1px solid var(--border);
+    color: var(--accent);
+    font-family: var(--font-mono);
+    font-size: 11px;
+    padding: 5px 8px;
+    cursor: pointer;
+    letter-spacing: 0.05em;
+  }
+  button:hover { background: #2e2e2e; border-color: var(--gold); }
+  button.primary { border-color: var(--gold); color: var(--gold); }
+  button.play-btn { border-color: var(--green); color: var(--green); }
+  button.stop-btn { border-color: var(--red); color: var(--red); }
+  .btn-row { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 5px; }
+  .btn-row button { flex: 1; min-width: 60px; }
+  #err-msg {
+    color: var(--red);
+    font-size: 10px;
+    padding: 4px 0;
+    white-space: pre-wrap;
+    display: none;
+  }
+  #n-display { color: var(--gold); font-size: 11px; margin-bottom: 4px; }
+  #canvases {
+    display: flex;
+    flex: 1;
+    overflow: hidden;
+  }
+  .canvas-panel {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    border-right: 1px solid var(--border);
+    padding: 6px;
+    min-width: 0;
+  }
+  .canvas-panel:last-child { border-right: none; }
+  .panel-title {
+    font-size: 10px;
+    letter-spacing: 0.12em;
+    margin-bottom: 4px;
+    color: var(--dim);
+  }
+  canvas {
+    background: white;
+    display: block;
+    image-rendering: auto;
+  }
+  #out-panel {
+    width: 200px;
+    background: var(--panel);
+    border-left: 1px solid var(--border);
+    overflow-y: auto;
+    padding: 10px;
+    flex-shrink: 0;
+    font-size: 10px;
+  }
+  #out-text {
+    white-space: pre;
+    color: var(--dim);
+    line-height: 1.5;
+  }
+  .frame-indicator {
+    font-size: 10px;
+    color: var(--gold);
+    margin-top: 3px;
+  }
+</style>
+</head>
+<body>
+<div id="header">
+  <h1>▸ CAM GENERATOR</h1>
+  <span style="color:var(--dim);font-size:10px;">4節リンク ↔ カム変換</span>
+  <div id="err-msg"></div>
+</div>
+<div id="main">
+  <div id="sidebar">
+    <div class="sec-label">INPUT DATA</div>
+    <label>α,β,z データ（1行1フレーム）</label>
+    <textarea id="abz-input" rows="8">25.1,44.3,1
+25.0,45.8,1
+30.0,60.5,0
+35.0,70.0,1
+40.0,75.2,1
+38.0,68.0,0
+32.0,55.0,1
+27.0,48.0,1</textarea>
+
+    <div class="sec-label">PARAMETERS</div>
+    <label>アーム長 l (mm)</label>
+    <input type="number" id="l-val" value="30" step="0.1" min="1">
+    <div class="row-2">
+      <div>
+        <label>z_min</label>
+        <input type="number" id="zmin-val" value="0" step="0.1">
+      </div>
+      <div>
+        <label>z_max</label>
+        <input type="number" id="zmax-val" value="1" step="0.1">
+      </div>
+    </div>
+
+    <div class="sec-label">CAM PARAMS</div>
+    <label>基準半径 baseRadius (mm)</label>
+    <input type="number" id="base-radius" value="40" step="0.5" min="1">
+    <label>αβ最大振幅 ampAB (mm)</label>
+    <input type="number" id="amp-ab" value="15" step="0.5" min="0">
+    <label>z最大振幅 ampZ (mm)</label>
+    <input type="number" id="amp-z" value="10" step="0.5" min="0">
+    <label>穴径 holeDiameter (mm)</label>
+    <input type="number" id="hole-dia" value="8" step="0.5" min="0">
+
+    <div id="n-display">N = —</div>
+
+    <div class="sec-label">ACTIONS</div>
+    <button class="primary" onclick="generate()" style="width:100%;margin-bottom:5px;">▸ 生成</button>
+    <div class="btn-row">
+      <button class="play-btn" onclick="play()">▶ 再生</button>
+      <button class="stop-btn" onclick="stopAnim()">■ 停止</button>
+    </div>
+    <div class="btn-row">
+      <button onclick="savePNG('alpha')">α PNG</button>
+      <button onclick="savePNG('beta')">β PNG</button>
+      <button onclick="savePNG('z')">z PNG</button>
+    </div>
+  </div>
+
+  <div id="canvases">
+    <div class="canvas-panel">
+      <div class="panel-title">4節リンク機構</div>
+      <canvas id="mech-canvas"></canvas>
+      <div class="frame-indicator" id="frame-ind">—</div>
+    </div>
+    <div class="canvas-panel">
+      <div class="panel-title">α カム（青）</div>
+      <canvas id="cam-alpha-canvas"></canvas>
+    </div>
+    <div class="canvas-panel">
+      <div class="panel-title">β カム（緑）</div>
+      <canvas id="cam-beta-canvas"></canvas>
+    </div>
+    <div class="canvas-panel">
+      <div class="panel-title">z カム（赤）</div>
+      <canvas id="cam-z-canvas"></canvas>
+    </div>
+  </div>
+
+  <div id="out-panel">
+    <div class="sec-label" style="color:var(--gold);font-size:10px;margin-bottom:6px;">OUTPUT</div>
+    <div id="out-text">—</div>
+  </div>
+</div>
+
+<script>
+// ─────────────────────────────────────────
+// Utilities
+// ─────────────────────────────────────────
+function deg2rad(d){ return d * Math.PI / 180; }
+function rad2deg(r){ return r * 180 / Math.PI; }
+
+function wrapNear(angle, ref) {
+  let diff = angle - ref;
+  diff = diff - 360 * Math.round(diff / 360);
+  return ref + diff;
+}
+
+function normalize360(a) {
+  a = a % 360;
+  if(a < 0) a += 360;
+  return a;
+}
+
+function showErr(msg) {
+  const el = document.getElementById('err-msg');
+  if(msg) { el.textContent = msg; el.style.display='block'; }
+  else { el.textContent=''; el.style.display='none'; }
+}
+
+// ─────────────────────────────────────────
+// Parse
+// ─────────────────────────────────────────
+function parseInput(text) {
+  const lines = text.split('\n').map(s=>s.trim()).filter(s=>s.length>0);
+  const rows = [];
+  for(let i=0;i<lines.length;i++){
+    const parts = lines[i].split(',').map(s=>s.trim());
+    if(parts.length < 3) throw new Error(`行${i+1}: カラム不足`);
+    const a = parseFloat(parts[0]);
+    const b = parseFloat(parts[1]);
+    const z = parseFloat(parts[2]);
+    if(isNaN(a)||isNaN(b)||isNaN(z)) throw new Error(`行${i+1}: 数値エラー`);
+    rows.push({alpha:a, beta:b, z:z});
+  }
+  if(rows.length < 2) throw new Error('最低2行必要です');
+  return rows;
+}
+
+// ─────────────────────────────────────────
+// Forward Kinematics
+// ─────────────────────────────────────────
+function forwardKinematics(alpha_deg, beta_deg, l) {
+  const a = deg2rad(alpha_deg);
+  const b = deg2rad(beta_deg);
+  return {
+    x: l * Math.cos(a) + l * Math.cos(b),
+    y: l * Math.sin(a) + l * Math.sin(b)
+  };
+}
+
+// ─────────────────────────────────────────
+// Inverse Kinematics (same as RAW5 app)
+// ─────────────────────────────────────────
+function inverseKinematics(X, Y, l, prevAlpha, prevBeta) {
+  const rho = Math.hypot(X, Y);
+  const phi = Math.atan2(Y, X);
+  const cosT = rho / (2 * l);
+  if(cosT > 1.0 || cosT < -1.0) return null;
+  const theta = Math.acos(Math.max(-1, Math.min(1, cosT)));
+
+  const sol1_alpha = rad2deg(phi - theta);
+  const sol1_beta  = rad2deg(phi + theta);
+  const sol2_alpha = rad2deg(phi + theta);
+  const sol2_beta  = rad2deg(phi - theta);
+
+  const s1a = wrapNear(normalize360(sol1_alpha), prevAlpha);
+  const s1b = wrapNear(normalize360(sol1_beta),  prevBeta);
+  const s2a = wrapNear(normalize360(sol2_alpha), prevAlpha);
+  const s2b = wrapNear(normalize360(sol2_beta),  prevBeta);
+
+  const d1 = Math.abs(s1a - prevAlpha) + Math.abs(s1b - prevBeta);
+  const d2 = Math.abs(s2a - prevAlpha) + Math.abs(s2b - prevBeta);
+
+  if(d1 <= d2) return { alpha: s1a, beta: s1b };
+  else         return { alpha: s2a, beta: s2b };
+}
+
+// ─────────────────────────────────────────
+// Build continuous angle series (IK-based)
+// ─────────────────────────────────────────
+function buildContinuousAngles(rows, l) {
+  // Use forward kinematics on the input α,β to get pen positions,
+  // then run IK continuously to get consistent wrapped angles.
+  const N = rows.length;
+  const alphas = [];
+  const betas = [];
+
+  // Seed from first frame: start with raw α,β normalized then wrapNear'd from themselves
+  let prevAlpha = normalize360(rows[0].alpha);
+  let prevBeta  = normalize360(rows[0].beta);
+
+  // Use fwd kin of first row for IK seed
+  const p0 = forwardKinematics(rows[0].alpha, rows[0].beta, l);
+  const ik0 = inverseKinematics(p0.x, p0.y, l, prevAlpha, prevBeta);
+  if(!ik0) throw new Error('IK解なし: フレーム0');
+  prevAlpha = ik0.alpha;
+  prevBeta  = ik0.beta;
+  alphas.push(prevAlpha);
+  betas.push(prevBeta);
+
+  for(let i = 1; i < N; i++) {
+    const p = forwardKinematics(rows[i].alpha, rows[i].beta, l);
+    const ik = inverseKinematics(p.x, p.y, l, prevAlpha, prevBeta);
+    if(!ik) throw new Error(`IK解なし: フレーム${i}`);
+    prevAlpha = ik.alpha;
+    prevBeta  = ik.beta;
+    alphas.push(prevAlpha);
+    betas.push(prevBeta);
+  }
+  return { alphas, betas };
+}
+
+// ─────────────────────────────────────────
+// Build z profile
+// ─────────────────────────────────────────
+function buildZProfile(rows, zmin, zmax) {
+  const N = rows.length;
+  const zraw = rows.map(r => r.z);
+  // Map z values: z=1 → zmax, z=0 → zmin with linear interpolation
+  // Actually: use raw z values, linearly interpolate transitions
+  const zheight = [];
+  for(let i=0;i<N;i++){
+    const zv = zraw[i];
+    zheight.push(zmin + zv * (zmax - zmin));
+  }
+  // Smooth interpolation already handled by the z values themselves
+  return zheight;
+}
+
+// ─────────────────────────────────────────
+// Normalize series (min-max)
+// ─────────────────────────────────────────
+function normalizeSeries(arr) {
+  const mn = Math.min(...arr);
+  const mx = Math.max(...arr);
+  if(mx === mn) return arr.map(() => 0);
+  return arr.map(v => (v - mn) / (mx - mn));
+}
+
+// ─────────────────────────────────────────
+// Build cam profile
+// ─────────────────────────────────────────
+function buildCamProfile(normalizedArr, baseRadius, amplitude) {
+  // r = baseRadius - amplitude * normalized
+  return normalizedArr.map(n => baseRadius - amplitude * n);
+}
+
+// ─────────────────────────────────────────
+// Canvas sizing
+// ─────────────────────────────────────────
+function resizeCanvases() {
+  const panels = document.querySelectorAll('.canvas-panel');
+  panels.forEach((p, i) => {
+    const w = p.clientWidth - 12;
+    const h = p.clientHeight - 30;
+    const sz = Math.max(60, Math.min(w, h));
+    const cvs = p.querySelector('canvas');
+    if(cvs){ cvs.width = sz; cvs.height = sz; }
+  });
+}
+
+// ─────────────────────────────────────────
+// Global state
+// ─────────────────────────────────────────
+let appState = null;
+let animFrame = null;
+let currentFrame = 0;
+let animPlaying = false;
+
+// ─────────────────────────────────────────
+// Draw mechanism
+// ─────────────────────────────────────────
+function drawMechanism(canvas, alphas, betas, penXs, penYs, zraw, l, frameIdx) {
+  const ctx = canvas.getContext('2d');
+  const W = canvas.width, H = canvas.height;
+  ctx.clearRect(0, 0, W, H);
+  ctx.fillStyle = 'white';
+  ctx.fillRect(0, 0, W, H);
+
+  const yCenter = Math.sqrt(2) * l;
+  const worldSize = 75; // mm
+
+  // screen-to-world: origin at canvas center, y-axis up
+  // world range: -worldSize/2 to +worldSize/2 on both axes
+  // but we offset y by yCenter
+  const scale = W / worldSize;
+
+  function wx(x) { return W/2 + x * scale; }
+  function wy(y) { return H/2 - (y - yCenter) * scale; }
+
+  // Draw trajectory
+  ctx.lineWidth = 1.2;
+  for(let i=1;i<penXs.length;i++){
+    const z0 = zraw[i-1];
+    const z1 = zraw[i];
+    ctx.beginPath();
+    ctx.moveTo(wx(penXs[i-1]), wy(penYs[i-1]));
+    ctx.lineTo(wx(penXs[i]),   wy(penYs[i]));
+    if(z0 === 1 && z1 === 1) {
+      ctx.strokeStyle = '#111';
+      ctx.setLineDash([]);
+    } else {
+      ctx.strokeStyle = '#888';
+      ctx.setLineDash([3,3]);
+    }
+    ctx.stroke();
+    ctx.setLineDash([]);
+  }
+
+  const fi = frameIdx;
+  const a = deg2rad(alphas[fi]);
+  const b = deg2rad(betas[fi]);
+
+  // Arm alpha (blue)
+  ctx.beginPath();
+  ctx.moveTo(wx(0), wy(0));
+  ctx.lineTo(wx(l*Math.cos(a)), wy(l*Math.sin(a)));
+  ctx.strokeStyle = '#4a9eff';
+  ctx.lineWidth = 2;
+  ctx.stroke();
+
+  // Arm beta (green)
+  ctx.beginPath();
+  ctx.moveTo(wx(0), wy(0));
+  ctx.lineTo(wx(l*Math.cos(b)), wy(l*Math.sin(b)));
+  ctx.strokeStyle = '#4dff9a';
+  ctx.lineWidth = 2;
+  ctx.stroke();
+
+  // Pen rod alpha-end to pen
+  ctx.beginPath();
+  ctx.moveTo(wx(l*Math.cos(a)), wy(l*Math.sin(a)));
+  ctx.lineTo(wx(penXs[fi]), wy(penYs[fi]));
+  ctx.strokeStyle = '#4a9eff';
+  ctx.lineWidth = 1;
+  ctx.setLineDash([3,2]);
+  ctx.stroke();
+  ctx.setLineDash([]);
+
+  // Pen rod beta-end to pen
+  ctx.beginPath();
+  ctx.moveTo(wx(l*Math.cos(b)), wy(l*Math.sin(b)));
+  ctx.lineTo(wx(penXs[fi]), wy(penYs[fi]));
+  ctx.strokeStyle = '#4dff9a';
+  ctx.lineWidth = 1;
+  ctx.setLineDash([3,2]);
+  ctx.stroke();
+  ctx.setLineDash([]);
+
+  // Origin
+  ctx.beginPath();
+  ctx.arc(wx(0), wy(0), 5, 0, Math.PI*2);
+  ctx.fillStyle = '#f0c040';
+  ctx.fill();
+  ctx.strokeStyle = '#000';
+  ctx.lineWidth = 1;
+  ctx.stroke();
+
+  // Pen position
+  ctx.beginPath();
+  ctx.arc(wx(penXs[fi]), wy(penYs[fi]), 4, 0, Math.PI*2);
+  ctx.fillStyle = zraw[fi]===1 ? '#111' : '#aaa';
+  ctx.fill();
+  ctx.strokeStyle = '#000';
+  ctx.lineWidth = 1;
+  ctx.stroke();
+}
+
+// ─────────────────────────────────────────
+// Draw single cam
+// ─────────────────────────────────────────
+function drawCam(canvas, radii, color, frameIdx, baseRadius, holeDia) {
+  const ctx = canvas.getContext('2d');
+  const W = canvas.width, H = canvas.height;
+  ctx.clearRect(0,0,W,H);
+  ctx.fillStyle='white';
+  ctx.fillRect(0,0,W,H);
+
+  const N = radii.length;
+  const maxR = Math.max(...radii, baseRadius);
+  const margin = 12;
+  const scale = (Math.min(W,H)/2 - margin) / maxR;
+  const cx = W/2, cy = H/2;
+
+  // Smooth interpolation using spline-like approach
+  // Generate smooth cam outline
+  const pts = [];
+  for(let i=0;i<N;i++){
+    const angle = (2*Math.PI*i/N) - Math.PI/2; // start from top
+    const r = radii[i] * scale;
+    pts.push({ x: cx + r*Math.cos(angle), y: cy + r*Math.sin(angle) });
+  }
+
+  ctx.beginPath();
+  // Smooth closed curve using cardinal spline
+  drawSmoothClosedCurve(ctx, pts);
+  ctx.fillStyle = color + '22';
+  ctx.fill();
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 2;
+  ctx.stroke();
+
+  // Concentric reference circle (baseRadius)
+  ctx.beginPath();
+  ctx.arc(cx, cy, baseRadius * scale, 0, Math.PI*2);
+  ctx.strokeStyle = '#ccc';
+  ctx.lineWidth = 0.5;
+  ctx.setLineDash([3,3]);
+  ctx.stroke();
+  ctx.setLineDash([]);
+
+  // Center hole
+  const holeR = (holeDia/2) * scale;
+  if(holeR > 1) {
+    ctx.beginPath();
+    ctx.arc(cx, cy, holeR, 0, Math.PI*2);
+    ctx.fillStyle = 'white';
+    ctx.fill();
+    ctx.strokeStyle = '#555';
+    ctx.lineWidth = 1;
+    ctx.stroke();
+  }
+
+  // Center dot
+  ctx.beginPath();
+  ctx.arc(cx, cy, 2, 0, Math.PI*2);
+  ctx.fillStyle = '#333';
+  ctx.fill();
+
+  // Cam rotation indicator line
+  const rotAngle = (2*Math.PI*frameIdx/N) - Math.PI/2;
+  const rCur = radii[frameIdx] * scale;
+  ctx.beginPath();
+  ctx.moveTo(cx, cy);
+  ctx.lineTo(cx + rCur*Math.cos(rotAngle), cy + rCur*Math.sin(rotAngle));
+  ctx.strokeStyle = '#f0c040';
+  ctx.lineWidth = 1.5;
+  ctx.stroke();
+
+  // Follower point
+  ctx.beginPath();
+  ctx.arc(cx + rCur*Math.cos(rotAngle), cy + rCur*Math.sin(rotAngle), 3, 0, Math.PI*2);
+  ctx.fillStyle = '#f0c040';
+  ctx.fill();
+}
+
+function drawSmoothClosedCurve(ctx, pts) {
+  const n = pts.length;
+  if(n < 3){ ctx.moveTo(pts[0].x,pts[0].y); for(let i=1;i<n;i++) ctx.lineTo(pts[i].x,pts[i].y); return; }
+  const tension = 0.4;
+  ctx.moveTo(pts[0].x, pts[0].y);
+  for(let i=0;i<n;i++){
+    const p0 = pts[(i-1+n)%n];
+    const p1 = pts[i];
+    const p2 = pts[(i+1)%n];
+    const p3 = pts[(i+2)%n];
+    const cp1x = p1.x + (p2.x-p0.x)*tension/2;
+    const cp1y = p1.y + (p2.y-p0.y)*tension/2;
+    const cp2x = p2.x - (p3.x-p1.x)*tension/2;
+    const cp2y = p2.y - (p3.y-p1.y)*tension/2;
+    ctx.bezierCurveTo(cp1x,cp1y,cp2x,cp2y,p2.x,p2.y);
+  }
+  ctx.closePath();
+}
+
+// ─────────────────────────────────────────
+// Generate
+// ─────────────────────────────────────────
+function generate() {
+  showErr('');
+  try {
+    const text   = document.getElementById('abz-input').value;
+    const l      = parseFloat(document.getElementById('l-val').value);
+    const zmin   = parseFloat(document.getElementById('zmin-val').value);
+    const zmax   = parseFloat(document.getElementById('zmax-val').value);
+    const baseR  = parseFloat(document.getElementById('base-radius').value);
+    const ampAB  = parseFloat(document.getElementById('amp-ab').value);
+    const ampZ   = parseFloat(document.getElementById('amp-z').value);
+    const holeDia= parseFloat(document.getElementById('hole-dia').value);
+
+    if(isNaN(l)||l<=0) throw new Error('l が無効');
+    if(isNaN(baseR)||baseR<=0) throw new Error('baseRadius が無効');
+    if(isNaN(ampAB)||ampAB<0) throw new Error('ampAB が無効');
+    if(isNaN(ampZ)||ampZ<0) throw new Error('ampZ が無効');
+    if(ampAB > baseR) throw new Error('ampAB > baseRadius');
+    if(ampZ  > baseR) throw new Error('ampZ > baseRadius');
+
+    const rows = parseInput(text);
+    const N = rows.length;
+    document.getElementById('n-display').textContent = `N = ${N}`;
+
+    // Build continuous angles
+    const { alphas, betas } = buildContinuousAngles(rows, l);
+
+    // Forward kinematics for pen positions
+    const penXs = [], penYs = [];
+    for(let i=0;i<N;i++){
+      const p = forwardKinematics(alphas[i], betas[i], l);
+      penXs.push(p.x);
+      penYs.push(p.y);
+    }
+
+    // Z profile
+    const zheight = buildZProfile(rows, zmin, zmax);
+    const zNorm   = normalizeSeries(zheight);
+
+    // Normalize alpha/beta from continuous (unwrapped) values
+    const alphaNorm = normalizeSeries(alphas);
+    const betaNorm  = normalizeSeries(betas);
+
+    // Cam radii
+    const alphaRadii = buildCamProfile(alphaNorm, baseR, ampAB);
+    const betaRadii  = buildCamProfile(betaNorm,  baseR, ampAB);
+    const zRadii     = buildCamProfile(zNorm,     baseR, ampZ);
+
+    const zraw = rows.map(r=>r.z);
+    const yCenter = Math.sqrt(2) * l;
+
+    appState = {
+      N, l, alphas, betas, penXs, penYs, zraw,
+      alphaRadii, betaRadii, zRadii,
+      alphaNorm, betaNorm, zNorm,
+      baseR, ampAB, ampZ, holeDia, zmin, zmax, yCenter
+    };
+
+    stopAnim();
+    currentFrame = 0;
+    resizeCanvases();
+    renderFrame(0);
+
+    // Output text
+    let out = `N = ${N}\nl = ${l}\nyCenter = ${yCenter.toFixed(3)}\nzmin = ${zmin}\nzmax = ${zmax}\nholeDia = ${holeDia}\nbaseRadius = ${baseR}\nampAB = ${ampAB}\nampZ = ${ampZ}\n\n`;
+    out += `i  α         β         z   αNorm   βNorm   zNorm\n`;
+    out += `${'─'.repeat(54)}\n`;
+    for(let i=0;i<N;i++){
+      out += `${String(i).padStart(2)}  ${alphas[i].toFixed(2).padStart(7)}  ${betas[i].toFixed(2).padStart(7)}  ${zraw[i]}  ${alphaNorm[i].toFixed(3)}  ${betaNorm[i].toFixed(3)}  ${zNorm[i].toFixed(3)}\n`;
+    }
+    document.getElementById('out-text').textContent = out;
+
+  } catch(e) {
+    showErr('エラー: ' + e.message);
+  }
+}
+
+// ─────────────────────────────────────────
+// Render single frame
+// ─────────────────────────────────────────
+function renderFrame(fi) {
+  if(!appState) return;
+  const s = appState;
+  const mechCvs  = document.getElementById('mech-canvas');
+  const camACvs  = document.getElementById('cam-alpha-canvas');
+  const camBCvs  = document.getElementById('cam-beta-canvas');
+  const camZCvs  = document.getElementById('cam-z-canvas');
+
+  drawMechanism(mechCvs, s.alphas, s.betas, s.penXs, s.penYs, s.zraw, s.l, fi);
+  drawCam(camACvs, s.alphaRadii, '#4a9eff', fi, s.baseR, s.holeDia);
+  drawCam(camBCvs, s.betaRadii,  '#4dff9a', fi, s.baseR, s.holeDia);
+  drawCam(camZCvs, s.zRadii,     '#ff4d6a', fi, s.baseR, s.holeDia);
+
+  document.getElementById('frame-ind').textContent =
+    `フレーム ${fi+1}/${s.N}  α=${s.alphas[fi].toFixed(1)}°  β=${s.betas[fi].toFixed(1)}°  z=${s.zraw[fi]}`;
+}
+
+// ─────────────────────────────────────────
+// Animation
+// ─────────────────────────────────────────
+let lastTime = 0;
+const FPS = 12;
+function animLoop(ts) {
+  if(!animPlaying) return;
+  if(ts - lastTime > 1000/FPS) {
+    lastTime = ts;
+    if(appState){
+      currentFrame = (currentFrame + 1) % appState.N;
+      renderFrame(currentFrame);
+    }
+  }
+  animFrame = requestAnimationFrame(animLoop);
+}
+
+function play() {
+  if(!appState){ showErr('先に「生成」を実行してください'); return; }
+  if(animPlaying) return;
+  animPlaying = true;
+  animFrame = requestAnimationFrame(animLoop);
+}
+
+function stopAnim() {
+  animPlaying = false;
+  if(animFrame){ cancelAnimationFrame(animFrame); animFrame=null; }
+}
+
+// ─────────────────────────────────────────
+// PNG Save
+// ─────────────────────────────────────────
+function savePNG(which) {
+  if(!appState){ showErr('先に「生成」を実行してください'); return; }
+  const s = appState;
+  const sz = 512;
+  const offscreen = document.createElement('canvas');
+  offscreen.width = sz; offscreen.height = sz;
+
+  let radii, color, name;
+  if(which==='alpha'){ radii=s.alphaRadii; color='#4a9eff'; name='alpha_cam.png'; }
+  else if(which==='beta'){ radii=s.betaRadii; color='#4dff9a'; name='beta_cam.png'; }
+  else { radii=s.zRadii; color='#ff4d6a'; name='z_cam.png'; }
+
+  const ctx = offscreen.getContext('2d');
+  const W=sz, H=sz;
+  ctx.fillStyle='white';
+  ctx.fillRect(0,0,W,H);
+
+  const maxR = Math.max(...radii, s.baseR);
+  const margin = 20;
+  const scale = (Math.min(W,H)/2 - margin) / maxR;
+  const cx=W/2, cy=H/2;
+  const N = radii.length;
+
+  const pts = [];
+  for(let i=0;i<N;i++){
+    const angle = (2*Math.PI*i/N) - Math.PI/2;
+    const r = radii[i]*scale;
+    pts.push({x: cx+r*Math.cos(angle), y: cy+r*Math.sin(angle)});
+  }
+
+  ctx.beginPath();
+  drawSmoothClosedCurve(ctx, pts);
+  ctx.fillStyle = color+'18';
+  ctx.fill();
+  ctx.strokeStyle = '#000';
+  ctx.lineWidth = 2;
+  ctx.stroke();
+
+  // Hole
+  const holeR = (s.holeDia/2)*scale;
+  if(holeR > 1){
+    ctx.beginPath();
+    ctx.arc(cx,cy,holeR,0,Math.PI*2);
+    ctx.fillStyle='white';
+    ctx.fill();
+    ctx.strokeStyle='#000';
+    ctx.lineWidth=1.5;
+    ctx.stroke();
+  }
+
+  // Center mark
+  ctx.beginPath();
+  ctx.moveTo(cx-8,cy); ctx.lineTo(cx+8,cy);
+  ctx.moveTo(cx,cy-8); ctx.lineTo(cx,cy+8);
+  ctx.strokeStyle='#000';
+  ctx.lineWidth=1;
+  ctx.stroke();
+
+  const link = document.createElement('a');
+  link.download = name;
+  link.href = offscreen.toDataURL('image/png');
+  link.click();
+}
+
+// ─────────────────────────────────────────
+// Resize handling
+// ─────────────────────────────────────────
+window.addEventListener('resize', () => {
+  resizeCanvases();
+  if(appState) renderFrame(currentFrame);
+});
+
+window.addEventListener('load', () => {
+  resizeCanvases();
+});
+</script>
+</body>
+</html>
